@@ -1,0 +1,23 @@
+{% extends 'platform_admin/base.html' %}
+{% block content %}
+<div class="d-flex justify-content-center align-items-center" style="min-height:60vh">
+  <div class="card border-0 shadow-sm" style="max-width:440px;width:100%">
+    <div class="card-body p-4 text-center">
+      <div class="fs-1 mb-2">⚠️</div>
+      <h5 class="fw-semibold">Delete "{{ tenant.name }}"?</h5>
+      <p class="text-muted small">
+        This permanently deletes the store and <strong>all its data</strong> —
+        users, products, sales, and customers. This cannot be undone.
+      </p>
+      <div class="d-flex gap-2 justify-content-center mt-3">
+        <a href="{% url 'platform_admin:store_detail' tenant.id %}"
+           class="btn btn-secondary">Cancel</a>
+        <form method="post">
+          {% csrf_token %}
+          <button class="btn btn-danger">Yes, delete everything</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

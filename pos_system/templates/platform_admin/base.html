@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Platform Admin{% endblock %} — POS</title>
+  {% load static %}
+  <link href="{% static 'icons/bootstrap-icons.css' %}" rel="stylesheet">
+  <style>
+    :root {
+      --navy:   #0f1623;
+      --navy2:  #161e2e;
+      --navy3:  #1e293b;
+      --accent: #10b981;
+      --accent2:#059669;
+      --amber:  #f59e0b;
+      --danger: #ef4444;
+      --text:   #f1f5f9;
+      --text2:  #94a3b8;
+      --text3:  #475569;
+      --border: rgba(255,255,255,0.07);
+      --card:   #1a2234;
+      --sidebar-w: 220px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--navy);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────── */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-height: 100vh;
+      background: var(--navy2);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 100;
+    }
+    .sidebar-brand {
+      padding: 24px 20px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-brand .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    .sidebar-brand .tagline {
+      font-size: 11px;
+      color: var(--text3);
+      margin-top: 2px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .sidebar-nav { padding: 16px 12px; flex: 1; }
+    .nav-section-label {
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text3);
+      padding: 12px 8px 6px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      color: var(--text2);
+      text-decoration: none;
+      font-size: 13.5px;
+      font-weight: 400;
+      transition: all .15s;
+      margin-bottom: 2px;
+    }
+    .nav-item i { font-size: 15px; width: 18px; text-align: center; }
+    .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .nav-item.active { background: rgba(16,185,129,0.12); color: var(--accent); font-weight: 500; }
+    .nav-item.active i { color: var(--accent); }
+
+    .sidebar-footer {
+      padding: 16px 12px;
+      border-top: 1px solid var(--border);
+    }
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.04);
+    }
+    .user-avatar {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), #3b82f6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 600; color: #fff;
+      flex-shrink: 0;
+    }
+    .user-name { font-size: 13px; font-weight: 500; color: var(--text); }
+    .user-role { font-size: 11px; color: var(--text3); }
+    .logout-btn {
+      margin-left: auto;
+      color: var(--text3);
+      text-decoration: none;
+      font-size: 15px;
+      transition: color .15s;
+    }
+    .logout-btn:hover { color: var(--danger); }
+
+    /* ── Main ────────────────────────────────────────── */
+    .main {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      padding: 16px 32px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--navy);
+      position: sticky; top: 0; z-index: 50;
+    }
+    .page-title { font-size: 18px; font-weight: 700; color: var(--text); }
+    .topbar-actions { display: flex; gap: 10px; align-items: center; }
+    .content { padding: 28px 32px; animation: fadeUp .3s ease both; }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+    /* ── Cards ───────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+
+    /* ── Stat Cards ──────────────────────────────────── */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 16px; margin-bottom: 28px; }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+    .stat-card.green::before { background: var(--accent); }
+    .stat-card.amber::before { background: var(--amber); }
+    .stat-card.blue::before  { background: #3b82f6; }
+    .stat-card.red::before   { background: var(--danger); }
+    .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .stat-value { font-size: 26px; font-weight: 700; color: var(--text); }
+    .stat-icon  { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); font-size: 28px; opacity: .1; }
+
+    /* ── Buttons ─────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 8px;
+      font-size: 13px; font-weight: 500;
+      font-family: 'DM Sans', sans-serif;
+      cursor: pointer; border: none;
+      text-decoration: none; transition: all .15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent2); color: #fff; }
+    .btn-ghost   { background: rgba(255,255,255,0.06); color: var(--text2); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .btn-danger  { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-warning { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.2); }
+    .btn-warning:hover { background: rgba(245,158,11,0.25); }
+    .btn-sm { padding: 5px 11px; font-size: 12px; }
+
+    /* ── Tables ──────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    thead th {
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 11px; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text3);
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+    tbody tr:last-child { border-bottom: none; }
+    tbody td { padding: 12px 14px; color: var(--text2); vertical-align: middle; }
+    tbody td.strong { color: var(--text); font-weight: 500; }
+
+    /* ── Badges ──────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      padding: 3px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 500;
+    }
+    .badge-green { background: rgba(16,185,129,0.15); color: #34d399; }
+    .badge-amber { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .badge-red   { background: rgba(239,68,68,0.15);  color: #f87171; }
+    .badge-blue  { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .badge-gray  { background: rgba(255,255,255,0.07); color: var(--text3); }
+
+    /* ── Forms ───────────────────────────────────────── */
+    .form-group { margin-bottom: 18px; }
+    .form-label {
+      display: block; font-size: 12px; font-weight: 500;
+      color: var(--text2); margin-bottom: 6px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .form-control {
+      width: 100%; padding: 9px 13px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text);
+      font-size: 13.5px; font-family: 'DM Sans', sans-serif;
+      transition: border-color .15s; outline: none;
+    }
+    .form-control:focus { border-color: var(--accent); }
+
+    /* ── Alerts ──────────────────────────────────────── */
+    .alert {
+      padding: 12px 16px; border-radius: 8px;
+      font-size: 13px; margin-bottom: 12px;
+      display: flex; align-items: center; gap: 10px;
+      animation: fadeUp .2s ease both;
+    }
+    .alert-success { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); color: #34d399; }
+    .alert-error, .alert-danger { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); color: #f87171; }
+    .alert-warning { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.25); color: #fbbf24; }
+    .alert-close { margin-left: auto; background: none; border: none; color: inherit; opacity: .6; cursor: pointer; font-size: 14px; padding: 0; }
+
+    /* ── Modal ───────────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,0.5);
+      display: none; justify-content: center;
+      align-items: flex-start;
+      padding: 24px;
+      overflow-y: auto;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 14px; width: 100%; max-width: 520px;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+    }
+    .modal-title { font-size: 15px; font-weight: 600; }
+    .modal-close { background: none; border: none; color: var(--text2); cursor: pointer; font-size: 15px; }
+    .modal-close:hover { color: var(--text); }
+    .modal-body  { padding: 20px; }
+    .modal-footer {
+      display: flex; gap: 10px; padding: 16px 20px;
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">&#9632; POS</div>
+    <div class="tagline">Platform Admin</div>
+  </div>
+  <nav class="sidebar-nav">
+
+    <div class="nav-section-label">Main</div>
+    <a href="{% url 'platform_admin:dashboard' %}"
+       class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+      <i class="bi bi-grid-1x2"></i> All Stores
+    </a>
+
+    {% if current_tenant %}
+    <div class="nav-section-label">Managing</div>
+    <a href="{% url 'platform_admin:store_detail' current_tenant.id %}"
+       class="nav-item {% if request.resolver_match.url_name == 'store_detail' %}active{% endif %}">
+      <i class="bi bi-shop"></i> {{ current_tenant.name }}
+    </a>
+    {% endif %}
+
+  </nav>
+  <div class="sidebar-footer">
+    <div class="user-pill">
+      <div class="user-avatar">{{ request.user.username|first|upper }}</div>
+      <div>
+        <div class="user-name">{{ request.user.username }}</div>
+        <div class="user-role">Platform Admin</div>
+      </div>
+      <a href="{% url 'platform_admin:logout' %}" class="logout-btn" title="Sign out">
+        <i class="bi bi-box-arrow-right"></i>
+      </a>
+    </div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div class="page-title">{% block page_title %}Dashboard{% endblock %}</div>
+    <div class="topbar-actions">{% block topbar_actions %}{% endblock %}</div>
+  </div>
+  <div class="content">
+    {% if messages %}
+    <div id="messages-container" style="margin-bottom:16px;">
+      {% for message in messages %}
+      <div class="alert alert-{{ message.tags }}">
+        <i class="bi bi-{% if message.tags == 'success' %}check-circle{% elif message.tags == 'error' or message.tags == 'danger' %}x-circle{% else %}info-circle{% endif %}"></i>
+        {{ message }}
+        <button class="alert-close" onclick="this.parentElement.remove()">
+          <i class="bi bi-x"></i>
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+</body>
+</html>

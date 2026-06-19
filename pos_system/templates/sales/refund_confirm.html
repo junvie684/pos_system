@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block page_title %}Refund Sale{% endblock %}
+{% block content %}
+
+<div style="max-width:520px;">
+  <div class="card">
+
+    <div style="margin-bottom:20px;">
+      <div style="font-size:15px; font-weight:500; color:var(--color-text-primary); margin-bottom:4px;">
+        Refund Sale #{{ sale.pk }}
+      </div>
+      <div style="font-size:13px; color:var(--color-text-secondary);">
+        {{ sale.created_at|date:"M d, Y H:i" }} · {{ sale.cashier }}
+      </div>
+    </div>
+
+    <!-- Sale Items -->
+    <div style="margin-bottom:20px;">
+      <div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:8px;">Items to be restocked:</div>
+      {% for item in sale.items.all %}
+      <div style="display:flex; justify-content:space-between; padding:8px 0;
+                  border-bottom:0.5px solid var(--color-border-tertiary); font-size:13px;">
+        <span style="color:var(--color-text-primary);">{{ item.product.name }}</span>
+        <span style="color:var(--color-text-secondary);">
+          x{{ item.quantity }} · ₱{{ item.subtotal }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Total -->
+    <div style="display:flex; justify-content:space-between; font-size:15px;
+                font-weight:500; color:var(--color-text-primary); margin-bottom:24px;">
+      <span>Total Refund</span>
+      <span>₱{{ sale.total }}</span>
+    </div>
+
+    <div style="font-size:13px; color:#f87171; margin-bottom:20px;">
+      ⚠️ This will mark the sale as refunded and restore all item stock. This cannot be undone.
+    </div>
+
+    <form method="post" style="display:flex; gap:10px;">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger">
+        <i class="bi bi-arrow-counterclockwise"></i> Confirm Refund
+      </button>
+      <a href="{% url 'sales:sale_history' %}" class="btn btn-ghost">Cancel</a>
+    </form>
+
+  </div>
+</div>
+
+{% endblock %}

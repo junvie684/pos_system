@@ -1,0 +1,765 @@
+{% extends 'base.html' %}
+{% block title %}New Sale — POS{% endblock %}
+{% block page_title %}Transaction{% endblock %}
+
+{% block content %}
+
+<div style="display:grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: start;">
+
+  <!-- LEFT: Product Grid -->
+  <div>
+    <!-- Search & Filter -->
+    <div style="display:flex; gap:10px; margin-bottom:16px;">
+      <input type="text" id="search-input" placeholder="Search products..."
+             oninput="filterProducts()"
+             style="flex:1; padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
+      <select id="category-filter" onchange="filterProducts()"
+              style="padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
+        <option value="">All Categories</option>
+        {% for category in categories %}
+        <option value="{{ category.name }}">{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Barcode Scanner Status Bar -->
+    <div id="scanner-status"
+         style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:10px; margin-bottom:16px;
+                background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); font-size:13px;">
+      <span id="scanner-icon" style="font-size:18px;">📷</span>
+      <div style="flex:1;">
+        <div style="font-weight:500; color:var(--color-text-primary);">Barcode Scanner Ready</div>
+        <div id="scanner-msg" style="font-size:11px; color:var(--color-text-secondary);">Scan any barcode or type manually</div>
+      </div>
+      <input type="text" id="barcode-manual" placeholder="Enter barcode…"
+             style="padding:6px 10px; border:0.5px solid var(--color-border-secondary); border-radius:6px;
+                    background:var(--color-background-primary); color:var(--color-text-primary);
+                    font-size:13px; width:160px;"
+             onkeydown="if(event.key==='Enter'){ handleBarcode(this.value.trim()); this.value=''; }">
+      <button onclick="handleBarcode(document.getElementById('barcode-manual').value.trim()); document.getElementById('barcode-manual').value='';"
+              style="padding:6px 12px; background:#1D9E75; color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;">
+        Add
+      </button>
+    </div>
+
+    <!-- Product Cards -->
+    <div style="font-size:12px; color:var(--color-text-tertiary); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+      <i class="bi bi-fire" style="color:#f59e0b;"></i>
+      Showing top 20 best-selling products
+    </div>
+    <div id="product-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap:12px;">
+      {% for product in products %}
+      <div class="product-card"
+           data-id="{{ product.pk }}"
+           data-name="{{ product.name }}"
+           data-price="{{ product.price }}"
+           data-stock="{{ product.stock }}"
+           data-category="{{ product.category|default:'' }}"
+           data-barcode="{{ product.barcode|default:'' }}"
+           onclick="addToCart(this)"
+           style="background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:12px; padding:14px 12px; cursor:pointer; transition:border-color .15s, background .15s; user-select:none; overflow:hidden;">
+        {% if product.image %}
+          <div style="width:100%; height:100px; border-radius:8px; margin-bottom:8px; overflow:hidden;">
+            <img src="{{ product.image.url }}" alt="{{ product.name }}"
+                 style="width:100%; height:100%; object-fit:cover; display:block;">
+          </div>
+        {% else %}
+          <div style="font-size:28px; text-align:center; margin-bottom:8px;">🛍️</div>
+        {% endif %}
+        <div style="font-size:13px; font-weight:500; color:var(--color-text-primary); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ product.name }}</div>
+        <div style="font-size:13px; color:var(--color-text-success); font-weight:500;">₱{{ product.price }}</div>
+        <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">Stock: {{ product.stock }}</div>
+        {% if product.total_sold %}
+          <div style="font-size:10px; color:#f59e0b; margin-top:2px;"><i class="bi bi-fire"></i> {{ product.total_sold }} sold</div>
+        {% endif %}
+        {% if not product.is_in_stock %}
+          <div style="font-size:11px; color:var(--color-text-danger); margin-top:4px;">Out of stock</div>
+        {% endif %}
+        {% if product.barcode %}
+          <div style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; font-family:monospace;">🔖 {{ product.barcode }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- RIGHT: Cart -->
+  <div style="background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:12px; padding:20px; position:sticky; top:20px;">
+    <div style="font-size:16px; font-weight:500; color:var(--color-text-primary); margin-bottom:16px; padding-bottom:12px; border-bottom:0.5px solid var(--color-border-tertiary);">
+      Current Sale
+      {% if pending_sale %}
+      <span style="font-size:12px; color:#3b82f6; margin-left:8px;">
+        <i class="bi bi-pause-circle"></i> Resuming #{{ pending_sale.pk }}
+      </span>
+      {% endif %}
+    </div>
+
+    <!-- Customer -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:12px; color:var(--color-text-secondary); display:block; margin-bottom:4px;">Customer (optional)</label>
+      <select id="customer-select" style="width:100%; padding:8px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+        <option value="">Walk-in Customer</option>
+        {% for customer in customers %}
+        <option value="{{ customer.pk }}" {% if pending_sale and pending_sale.customer and pending_sale.customer.pk == customer.pk %}selected{% endif %}>
+          {{ customer.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Cart Items -->
+    <div id="cart-items" style="min-height:120px; margin-bottom:14px;">
+      <div style="text-align:center; padding:30px 0; color:var(--color-text-tertiary); font-size:13px;">
+        Click a product or scan a barcode
+      </div>
+    </div>
+
+    <!-- Totals -->
+    <div style="border-top:0.5px solid var(--color-border-tertiary); padding-top:12px; margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-secondary); margin-bottom:6px;">
+        <span>Items</span><span id="total-items">0</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:600; color:var(--color-text-primary);">
+        <span>Total</span><span id="total-price">₱0.00</span>
+      </div>
+    </div>
+
+    <!-- Cash Tendered -->
+    <div id="cash-tendered-card" style="background:var(--color-background-secondary); border-radius:10px; padding:12px; margin-bottom:14px;">
+      <label style="font-size:12px; color:var(--color-text-secondary); display:block; margin-bottom:6px;">Cash Tendered</label>
+
+      <!-- Quick amount buttons -->
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;" id="quick-amounts">
+        <button class="quick-btn" onclick="setTendered(20)">₱20</button>
+        <button class="quick-btn" onclick="setTendered(50)">₱50</button>
+        <button class="quick-btn" onclick="setTendered(100)">₱100</button>
+        <button class="quick-btn" onclick="setTendered(200)">₱200</button>
+        <button class="quick-btn" onclick="setTendered(500)">₱500</button>
+        <button class="quick-btn" onclick="setExact()">Exact</button>
+      </div>
+
+      <!-- Manual input -->
+      <input type="number" id="cash-tendered" placeholder="0.00" min="0" step="0.01"
+             oninput="calcChange()"
+             style="width:100%; padding:9px 12px; border:0.5px solid var(--color-border-secondary);
+                    border-radius:8px; background:var(--color-background-primary);
+                    color:var(--color-text-primary); font-size:15px; font-weight:600;
+                    box-sizing:border-box; outline:none;">
+
+      <!-- Change due -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+        <span style="font-size:12px; color:var(--color-text-secondary);">Change Due</span>
+        <span id="change-due"
+              style="font-size:18px; font-weight:700; color:#34d399;">₱0.00</span>
+      </div>
+
+      <!-- Insufficient warning -->
+      <div id="insufficient-warning"
+           style="display:none; margin-top:8px; font-size:12px; color:#f87171;
+                  background:rgba(239,68,68,0.1); border-radius:6px; padding:6px 10px;">
+        ⚠️ Cash tendered is less than total
+      </div>
+    </div>
+
+    <!-- Mode of Payment -->
+    <div style="margin-bottom:14px;">
+      <label style="font-size:12px; color:var(--color-text-secondary); display:block; margin-bottom:4px;">Mode of Payment</label>
+      <select id="payment-method-select"
+              onchange="onPaymentMethodChange()"
+              style="width:100%; padding:8px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+        <option value="cash">Cash</option>
+        <option value="gcash">GCash</option>
+        <option value="maya">Maya</option>
+        <option value="grabpay">GrabPay</option>
+        <option value="bank_transfer">Bank Transfer</option>
+        <option value="credit_card">Credit Card</option>
+        <option value="debit_card">Debit Card</option>
+      </select>
+
+      <div id="reference-number-group" style="display:none; margin-top:8px;">
+        <input type="text" id="reference-number-input" placeholder="Reference / Transaction No."
+               style="width:100%; padding:8px 12px; border:0.5px solid var(--color-border-secondary);
+                      border-radius:8px; background:var(--color-background-primary);
+                      color:var(--color-text-primary); font-size:13px; box-sizing:border-box; outline:none;">
+      </div>
+    </div>
+
+    <!-- Form -->
+    <form method="post" id="sale-form" action="{% if pending_sale %}{% url 'sales:resume_sale' pending_sale.pk %}{% else %}{% url 'sales:create_sale' %}{% endif %}">
+      {% csrf_token %}
+      <input type="hidden" name="customer" id="form-customer">
+      <input type="hidden" name="status" id="form-status" value="completed">
+      <input type="hidden" name="cash_tendered" id="form-cash-tendered">
+      <input type="hidden" name="change_given" id="form-change-given">
+      <input type="hidden" name="payment_method" id="form-payment-method" value="cash">
+      <input type="hidden" name="reference_number" id="form-reference-number">
+      <div id="form-items"></div>
+
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <button type="button" id="complete-btn" onclick="completeSale()"
+                style="flex:1; padding:11px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:500; cursor:pointer; transition:background .15s;">
+          Complete Sale
+        </button>
+        <button type="button" onclick="saveAsPending()"
+                style="flex:1; padding:11px; background:transparent; color:var(--color-text-secondary); border:0.5px solid var(--color-border-secondary); border-radius:8px; font-size:14px; cursor:pointer;">
+          <i class="bi bi-pause-circle"></i> Hold Sale
+        </button>
+      </div>
+      <button type="button" onclick="clearCart()"
+              style="width:100%; padding:9px; background:transparent; color:var(--color-text-secondary); border:0.5px solid var(--color-border-secondary); border-radius:8px; font-size:13px; cursor:pointer;">
+        Clear
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"
+     style="position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px);
+            padding:10px 20px; border-radius:10px; font-size:13px; font-weight:500;
+            color:#fff; z-index:9999; transition:transform .3s ease, opacity .3s ease; opacity:0; pointer-events:none;">
+</div>
+
+<style>
+.product-card:hover {
+  border-color: #1D9E75 !important;
+  background: var(--color-background-secondary) !important;
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(29,158,117,0.2);
+}
+.product-card:hover img { transform: scale(1.07); }
+.product-card:active { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(29,158,117,0.15); }
+.product-card.out { opacity:0.45; pointer-events:none; }
+.product-card.flash-success {
+  border-color: #1D9E75 !important;
+  background: rgba(29,158,117,0.1) !important;
+}
+.cart-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:13px; }
+.qty-btn { width:24px; height:24px; border:0.5px solid var(--color-border-secondary); border-radius:6px; background:var(--color-background-secondary); color:var(--color-text-primary); cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; }
+.qty-btn:hover { background:var(--color-background-tertiary); }
+.quick-btn {
+  padding:4px 10px; font-size:12px; border-radius:6px; cursor:pointer;
+  border:0.5px solid var(--color-border-secondary);
+  background:var(--color-background-primary); color:var(--color-text-secondary);
+  transition:all .15s;
+}
+.quick-btn:hover { background:#1D9E75; color:#fff; border-color:#1D9E75; }
+.quick-btn.active { background:#1D9E75; color:#fff; border-color:#1D9E75; }
+</style>
+
+<script>
+// ── Barcode scanner ──────────────────────────────────────────────────────────
+let barcodeBuffer = '';
+let barcodeTimer  = null;
+
+function buildBarcodeMap() {
+  const map = {};
+  document.querySelectorAll('.product-card[data-barcode]').forEach(card => {
+    const bc = card.dataset.barcode.trim();
+    if (bc) map[bc] = card;
+  });
+  return map;
+}
+let barcodeMap = buildBarcodeMap();
+
+document.addEventListener('keydown', function(e) {
+  const tag = document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (e.key === 'Enter') {
+    if (barcodeBuffer.length >= 3) handleBarcode(barcodeBuffer);
+    barcodeBuffer = '';
+    clearTimeout(barcodeTimer);
+    return;
+  }
+  if (e.key.length === 1) {
+    barcodeBuffer += e.key;
+    clearTimeout(barcodeTimer);
+    barcodeTimer = setTimeout(() => { barcodeBuffer = ''; }, 300);
+  }
+});
+
+function handleBarcode(code) {
+  if (!code) return;
+  const card = barcodeMap[code];
+  if (!card) { showToast('❌ Barcode not found: ' + code, '#e74c3c'); setScannerMsg('Not found: ' + code, '❌'); return; }
+  if (parseInt(card.dataset.stock) === 0) { showToast('⚠️ Out of stock: ' + card.dataset.name, '#e67e22'); setScannerMsg('Out of stock: ' + card.dataset.name, '⚠️'); return; }
+  addToCart(card);
+  card.classList.add('flash-success');
+  setTimeout(() => card.classList.remove('flash-success'), 400);
+  setScannerMsg('Added: ' + card.dataset.name, '✅');
+  showToast('✅ Added: ' + card.dataset.name);
+}
+
+function setScannerMsg(msg, icon) {
+  document.getElementById('scanner-msg').textContent = msg;
+  document.getElementById('scanner-icon').textContent = icon || '📷';
+  clearTimeout(setScannerMsg._t);
+  setScannerMsg._t = setTimeout(() => {
+    document.getElementById('scanner-msg').textContent = 'Scan any barcode or type manually';
+    document.getElementById('scanner-icon').textContent = '📷';
+  }, 3000);
+}
+
+// ── Auto-focus barcode input on page load ────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    const barcodeInput = document.getElementById('barcode-manual');
+    if (barcodeInput) {
+        barcodeInput.focus();
+    }
+});
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg, color) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = color || '#1D9E75';
+  t.style.opacity = '1';
+  t.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translateX(-50%) translateY(80px)';
+  }, 2500);
+}
+
+// ── Cart ─────────────────────────────────────────────────────────────────────
+let cart = {};
+let cartTotal = 0;
+
+function addToCart(el) {
+  if (parseInt(el.dataset.stock) === 0) return;
+  const id = el.dataset.id;
+  if (cart[id]) {
+    if (cart[id].qty >= parseInt(el.dataset.stock)) {
+      showToast('⚠️ Max stock reached for ' + el.dataset.name, '#e67e22');
+      return;
+    }
+    cart[id].qty++;
+  } else {
+    cart[id] = { id, name: el.dataset.name, price: parseFloat(el.dataset.price), qty: 1, stock: parseInt(el.dataset.stock) };
+  }
+  renderCart();
+}
+
+function changeQty(id, delta) {
+  if (!cart[id]) return;
+  cart[id].qty += delta;
+  if (cart[id].qty <= 0) delete cart[id];
+  renderCart();
+}
+
+function renderCart() {
+  const container = document.getElementById('cart-items');
+  const keys = Object.keys(cart);
+  if (keys.length === 0) {
+    container.innerHTML = '<div style="text-align:center; padding:30px 0; color:var(--color-text-tertiary); font-size:13px;">Click a product or scan a barcode</div>';
+    document.getElementById('total-items').textContent = '0';
+    document.getElementById('total-price').textContent = '₱0.00';
+    cartTotal = 0;
+    calcChange();
+    return;
+  }
+  let html = '', total = 0, totalItems = 0;
+  keys.forEach(id => {
+    const item = cart[id];
+    const sub = item.price * item.qty;
+    total += sub; totalItems += item.qty;
+    html += `<div class="cart-row">
+      <div style="flex:1; font-weight:500; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${item.name}</div>
+      <button class="qty-btn" onclick="changeQty('${id}',-1)">−</button>
+      <span style="min-width:20px; text-align:center; color:var(--color-text-primary);">${item.qty}</span>
+      <button class="qty-btn" onclick="changeQty('${id}',1)">+</button>
+      <span style="min-width:60px; text-align:right; color:var(--color-text-primary);">₱${sub.toFixed(2)}</span>
+    </div>`;
+  });
+  container.innerHTML = html;
+  document.getElementById('total-items').textContent = totalItems;
+  document.getElementById('total-price').textContent = '₱' + total.toFixed(2);
+  cartTotal = total;
+  calcChange();
+}
+
+// ── Cash tendered & change ───────────────────────────────────────────────────
+function calcChange() {
+  const tendered = parseFloat(document.getElementById('cash-tendered').value) || 0;
+  const change = tendered - cartTotal;
+  const changeEl = document.getElementById('change-due');
+  const warning  = document.getElementById('insufficient-warning');
+  const btn      = document.getElementById('complete-btn');
+
+  if (tendered === 0 || cartTotal === 0) {
+    changeEl.textContent = '₱0.00';
+    changeEl.style.color = '#34d399';
+    warning.style.display = 'none';
+    btn.style.background = '#1D9E75';
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    return;
+  }
+
+  if (change < 0) {
+    changeEl.textContent = '−₱' + Math.abs(change).toFixed(2);
+    changeEl.style.color = '#f87171';
+    warning.style.display = 'block';
+    btn.style.background = '#374151';
+    btn.style.opacity = '0.6';
+    btn.style.cursor = 'not-allowed';
+  } else {
+    changeEl.textContent = '₱' + change.toFixed(2);
+    changeEl.style.color = '#34d399';
+    warning.style.display = 'none';
+    btn.style.background = '#1D9E75';
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+  }
+}
+
+function setTendered(amount) {
+  document.getElementById('cash-tendered').value = amount.toFixed(2);
+  document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  calcChange();
+}
+
+function setExact() {
+  document.getElementById('cash-tendered').value = cartTotal.toFixed(2);
+  document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  calcChange();
+}
+
+// ── Mode of Payment ──────────────────────────────────────────────────────────
+const EWALLET_METHODS = ['gcash', 'maya', 'grabpay', 'shopeepay', 'bank_transfer'];
+
+function onPaymentMethodChange() {
+  const select = document.getElementById('payment-method-select');
+  const refGroup = document.getElementById('reference-number-group');
+  const cashCard = document.getElementById('cash-tendered-card');
+
+  const isEwallet = EWALLET_METHODS.includes(select.value);
+  refGroup.style.display = isEwallet ? 'block' : 'none';
+
+  if (cashCard) {
+    cashCard.style.display = select.value === 'cash' ? 'block' : 'none';
+  }
+
+  if (select.value !== 'cash') {
+    document.getElementById('cash-tendered').value = '';
+    calcChange();
+  }
+}
+
+// ── Complete sale ────────────────────────────────────────────────────────────
+function clearCart() {
+  cart = {};
+  cartTotal = 0;
+  document.getElementById('cash-tendered').value = '';
+  document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+  calcChange();
+  renderCart();
+}
+
+function completeSale() {
+  if (Object.keys(cart).length === 0) { showToast('Add at least one product.', '#e74c3c'); return; }
+
+  const tendered = parseFloat(document.getElementById('cash-tendered').value) || 0;
+  const paymentMethod = document.getElementById('payment-method-select').value;
+  const referenceNumber = document.getElementById('reference-number-input').value.trim();
+
+  if (paymentMethod === 'cash') {
+    if (tendered > 0 && tendered < cartTotal) {
+      showToast('⚠️ Cash tendered is less than total.', '#e74c3c');
+      return;
+    }
+  } else if (EWALLET_METHODS.includes(paymentMethod) && !referenceNumber) {
+    showToast('⚠️ Please enter a reference number.', '#e74c3c');
+    return;
+  }
+
+  // Clear and rebuild form
+  document.getElementById('form-items').innerHTML = '';
+  document.getElementById('form-customer').value = document.getElementById('customer-select').value;
+  document.getElementById('form-status').value = 'completed';
+  document.getElementById('form-cash-tendered').value = tendered.toFixed(2);
+  document.getElementById('form-change-given').value = tendered > 0 ? (tendered - cartTotal).toFixed(2) : '0.00';
+  document.getElementById('form-payment-method').value = document.getElementById('payment-method-select').value;
+  document.getElementById('form-reference-number').value = document.getElementById('reference-number-input').value;
+
+  let html = '', i = 0;
+  Object.values(cart).forEach(item => {
+    html += `<input type="hidden" name="items-${i}-product" value="${item.id}">
+             <input type="hidden" name="items-${i}-quantity" value="${item.qty}">
+             <input type="hidden" name="items-${i}-unit_price" value="${item.price}">`;
+    i++;
+  });
+  html += `<input type="hidden" name="items-TOTAL_FORMS" value="${i}">
+           <input type="hidden" name="items-INITIAL_FORMS" value="0">
+           <input type="hidden" name="items-MIN_NUM_FORMS" value="0">
+           <input type="hidden" name="items-MAX_NUM_FORMS" value="1000">`;
+  document.getElementById('form-items').innerHTML = html;
+
+  // ── FETCH instead of form.submit() ──
+  const form = document.getElementById('sale-form');
+  const formData = new FormData(form);
+
+  fetch(form.action, {
+    method: 'POST',
+    body: formData,
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success && data.sale_id) {
+      openReceiptModal(data.sale_id);
+    } else if (data.redirect) {
+      window.location.href = data.redirect;
+    } else {
+      window.location.reload();
+    }
+  })
+  .catch(() => { form.submit(); });
+}
+
+// ── Save as pending ──────────────────────────────────────────────────────────
+function saveAsPending() {
+  if (Object.keys(cart).length === 0) {
+    showToast('Add at least one product.', '#e74c3c');
+    return;
+  }
+
+  document.getElementById('form-items').innerHTML = '';
+
+  document.getElementById('form-customer').value = document.getElementById('customer-select').value;
+  document.getElementById('form-status').value = 'pending';
+  document.getElementById('form-cash-tendered').value = '';
+  document.getElementById('form-change-given').value = '';
+  document.getElementById('form-payment-method').value = document.getElementById('payment-method-select').value;
+  document.getElementById('form-reference-number').value = document.getElementById('reference-number-input').value;
+
+  let html = '', i = 0;
+  Object.values(cart).forEach(item => {
+    html += `<input type="hidden" name="items-${i}-product" value="${item.id}">
+             <input type="hidden" name="items-${i}-quantity" value="${item.qty}">
+             <input type="hidden" name="items-${i}-unit_price" value="${item.price}">`;
+    i++;
+  });
+  html += `<input type="hidden" name="items-TOTAL_FORMS" value="${i}">
+           <input type="hidden" name="items-INITIAL_FORMS" value="0">
+           <input type="hidden" name="items-MIN_NUM_FORMS" value="0">
+           <input type="hidden" name="items-MAX_NUM_FORMS" value="1000">`;
+  document.getElementById('form-items').innerHTML = html;
+
+  document.getElementById('sale-form').submit();
+}
+
+// ── Filter & init ────────────────────────────────────────────────────────────
+function filterProducts() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const cat = document.getElementById('category-filter').value.toLowerCase();
+  document.querySelectorAll('.product-card').forEach(card => {
+    const match = card.dataset.name.toLowerCase().includes(search) &&
+                  (cat === '' || card.dataset.category.toLowerCase().includes(cat));
+    card.style.display = match ? '' : 'none';
+  });
+}
+
+document.querySelectorAll('.product-card').forEach(card => {
+  if (parseInt(card.dataset.stock) === 0) card.classList.add('out');
+});
+
+// ── Load pending sale if resuming ─────────────────────────────────────────────
+{% if pending_sale %}
+(function() {
+  {% for item in pending_sale.items.all %}
+  cart[{{ item.product.pk }}] = {
+    id: '{{ item.product.pk }}',
+    name: '{{ item.product.name|escapejs }}',
+    price: parseFloat('{{ item.unit_price }}'),
+    qty: {{ item.quantity }},
+    stock: {{ item.product.stock }}
+  };
+  {% endfor %}
+  renderCart();
+  showToast('✓ Loaded pending sale #{{ pending_sale.pk }}', '#3b82f6');
+
+  {% if pending_sale.payment_method %}
+  const pmSelect = document.getElementById('payment-method-select');
+  if (pmSelect) {
+      pmSelect.value = "{{ pending_sale.payment_method }}";
+      onPaymentMethodChange();
+  }
+  {% endif %}
+  {% if pending_sale.reference_number %}
+  const refInput = document.getElementById('reference-number-input');
+  if (refInput) refInput.value = "{{ pending_sale.reference_number|escapejs }}";
+  {% endif %}
+})();
+{% endif %}
+
+ // ── Restore cart on stock error ──────────────────────────────────────────────
+{% if preserved_cart %}
+(function() {
+    const preserved = {{ preserved_cart|safe }};
+    const customerSelect = document.getElementById('customer-select');
+    const cashInput = document.getElementById('cash-tendered');
+
+    // Restore customer
+    {% if preserved_customer %}
+    if (customerSelect) customerSelect.value = "{{ preserved_customer }}";
+    {% endif %}
+
+    // Restore cash tendered
+    {% if preserved_cash_tendered %}
+    if (cashInput) {
+        cashInput.value = "{{ preserved_cash_tendered }}";
+        calcChange();
+    }
+    {% endif %}
+
+    // Restore payment method
+    {% if preserved_payment_method %}
+    (function() {
+        const pmSelect = document.getElementById('payment-method-select');
+        if (pmSelect) {
+            pmSelect.value = "{{ preserved_payment_method }}";
+            onPaymentMethodChange();
+        }
+    })();
+    {% endif %}
+
+    // Restore reference number
+    {% if preserved_reference_number %}
+    (function() {
+        const refInput = document.getElementById('reference-number-input');
+        if (refInput) refInput.value = "{{ preserved_reference_number }}";
+    })();
+    {% endif %}
+
+    // Clear existing cart and rebuild from preserved data
+    cart = {};
+    let errorCount = 0;
+
+    preserved.forEach(item => {
+        const card = document.querySelector(`.product-card[data-id="${item.product_id}"]`);
+        const currentStock = card ? parseInt(card.dataset.stock) : item.stock;
+
+        // Use original quantity (don't auto-adjust — let cashier see the error)
+        const qty = item.quantity;
+
+        cart[item.product_id] = {
+            id: item.product_id,
+            name: item.name,
+            price: item.unit_price,
+            qty: qty,
+            stock: currentStock,
+            hasError: item.has_error || false  // Preserve error flag
+        };
+
+        if (item.has_error) {
+            errorCount++;
+        }
+    });
+
+    renderCart();
+
+    // Add visual error indicators to cart rows
+    setTimeout(() => {
+        Object.keys(cart).forEach(id => {
+            const item = cart[id];
+            if (item.hasError) {
+                // Find the cart row and add error styling
+                const rows = document.querySelectorAll('.cart-row');
+                rows.forEach(row => {
+                    if (row.textContent.includes(item.name)) {
+                        row.style.background = 'rgba(239, 68, 68, 0.08)';
+                        row.style.borderRadius = '6px';
+                        row.style.padding = '8px';
+
+                        // Add error badge if not exists
+                        if (!row.querySelector('.stock-error-badge')) {
+                            const badge = document.createElement('div');
+                            badge.className = 'stock-error-badge';
+                            badge.style.cssText = 'font-size:11px; color:#f87171; margin-top:4px;';
+                            row.appendChild(badge);
+                        }
+                    }
+                });
+            }
+        });
+    }, 50);
+
+    if (errorCount > 0) {
+        showToast(`⚠️ ${errorCount} item(s) out of stock. Adjust quantities to proceed.`, '#e67e22');
+    }
+
+    // Focus barcode for quick adjustment
+    document.getElementById('barcode-manual').focus();
+})();
+{% endif %}
+</script>
+
+
+<!-- ── Receipt Modal ── -->
+<div id="receiptModal" style="z-index:9999; display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="width:400px; background:#1e2d3d; border:0.5px solid rgba(255,255,255,0.12); border-radius:12px; overflow:hidden;">
+    <!-- Header -->
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#162030; border-bottom:0.5px solid rgba(255,255,255,0.1);">
+      <span style="font-weight:500; font-size:14px; color:#e2e8f0; display:flex; align-items:center; gap:8px;">
+        <i class="bi bi-receipt" style="color:#4ade80;"></i> Receipt
+      </span>
+      <div style="display:flex; gap:8px;">
+        <button onclick="printReceipt()"
+                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
+                       border:0.5px solid rgba(74,222,128,0.35); background:rgba(74,222,128,0.1);
+                       color:#4ade80; font-size:12px; font-weight:500; cursor:pointer;">
+          <i class="bi bi-printer"></i> Print
+        </button>
+        <button onclick="closeReceiptModal()"
+                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
+                       border:0.5px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05);
+                       color:#94a3b8; font-size:12px; font-weight:500; cursor:pointer;">
+          <i class="bi bi-x"></i> Close
+        </button>
+      </div>
+    </div>
+    <!-- Receipt iframe -->
+    <iframe id="receiptFrame"
+            style="width:100%; height:520px; border:none; display:block; background:#fff;"
+            src=""></iframe>
+  </div>
+</div>
+
+<script>
+function openReceiptModal(saleId) {
+  const modal = document.getElementById('receiptModal');
+  const frame = document.getElementById('receiptFrame');
+  frame.src = '/receipt/' + saleId + '/';
+  modal.style.cssText = modal.style.cssText.replace('display:none','display:flex');
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+}
+
+function closeReceiptModal() {
+  document.getElementById('receiptModal').style.display = 'none';
+  document.getElementById('receiptFrame').src = '';
+  cart = {};
+  cartTotal = 0;
+  window.location.href = "{% url 'sales:create_sale' %}?completed=1";
+}
+
+function printReceipt() {
+  document.getElementById('receiptFrame').contentWindow.print();
+}
+
+document.getElementById('receiptModal').addEventListener('click', function(e) {
+  if (e.target === this) closeReceiptModal();
+});
+
+// ── Show toast if redirected after completed sale ─────────────────────────
+if (new URLSearchParams(window.location.search).get('completed') === '1') {
+  showToast('✅ Sale completed successfully!', '#1D9E75');
+  history.replaceState(null, '', window.location.pathname);
+}
+</script>
+{% endblock %}

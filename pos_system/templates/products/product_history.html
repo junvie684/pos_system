@@ -1,0 +1,247 @@
+{% extends 'base.html' %}
+{% block page_title %}Product Sales History{% endblock %}
+{% block content %}
+
+<!-- Header -->
+<div style="margin-bottom:24px;">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+    {% if product.image %}
+    <div style="width:56px; height:56px; border-radius:10px; overflow:hidden; border:0.5px solid var(--color-border-secondary);">
+      <img src="{{ product.image.url }}" alt="{{ product.name }}" style="width:100%; height:100%; object-fit:cover;">
+    </div>
+    {% endif %}
+    <div>
+      <div style="font-size:18px; font-weight:600; color:var(--color-text-primary);">{{ product.name }}</div>
+      <div style="font-size:13px; color:var(--color-text-secondary);">
+        ₱{{ product.price }} · Stock: {{ product.stock }} · 
+        <span style="font-family:monospace; font-size:12px; color:var(--color-text-tertiary);">🔖 {{ product.barcode|default:"No barcode" }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom:20px; padding:16px 20px;">
+  <form method="get" style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+    
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label style="font-size:12px; color:var(--color-text-secondary);">From</label>
+      <input type="date" name="date_from" value="{{ date_from }}"
+             style="padding:7px 10px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                    background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label style="font-size:12px; color:var(--color-text-secondary);">To</label>
+      <input type="date" name="date_to" value="{{ date_to }}"
+             style="padding:7px 10px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                    background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label style="font-size:12px; color:var(--color-text-secondary);">Group By</label>
+      <select name="group_by"
+              style="padding:7px 10px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                     background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+        <option value="daily" {% if group_by == 'daily' %}selected{% endif %}>Daily</option>
+        <option value="monthly" {% if group_by == 'monthly' %}selected{% endif %}>Monthly</option>
+      </select>
+    </div>
+
+    <button type="submit"
+            style="padding:8px 18px; background:#1D9E75; color:#fff; border:none; border-radius:8px;
+                   font-size:13px; font-weight:500; cursor:pointer;">
+      Apply
+    </button>
+
+    <!-- Export -->
+    <div style="margin-left:auto; display:flex; gap:8px;">
+      <a href="?date_from={{ date_from }}&date_to={{ date_to }}&group_by={{ group_by }}&export=csv"
+         style="padding:8px 14px; background:var(--color-background-secondary); border:0.5px solid var(--color-border-secondary);
+                border-radius:8px; font-size:13px; color:var(--color-text-primary); text-decoration:none; display:flex; align-items:center; gap:6px;">
+        <i class="bi bi-filetype-csv"></i> CSV
+      </a>
+    </div>
+
+  </form>
+</div>
+
+<!-- Stats -->
+<div class="stat-grid" style="max-width:700px; margin-bottom:24px;">
+  <div class="stat-card blue">
+    <div class="stat-label">Total Units Sold</div>
+    <div class="stat-value">{{ totals.total_units|default:0 }}</div>
+    <i class="bi bi-box-seam stat-icon"></i>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Total Revenue</div>
+    <div class="stat-value">₱{{ totals.total_revenue|default:0|floatformat:2 }}</div>
+    <i class="bi bi-cash-stack stat-icon"></i>
+  </div>
+  <div class="stat-card amber">
+    <div class="stat-label">Transactions</div>
+    <div class="stat-value">{{ totals.total_transactions|default:0 }}</div>
+    <i class="bi bi-receipt stat-icon"></i>
+  </div>
+</div>
+
+{% if has_data %}
+<!-- Chart -->
+<div class="card" style="margin-bottom:24px; padding:20px;">
+  <div style="font-size:14px; font-weight:500; color:var(--color-text-primary); margin-bottom:16px;">
+    Units Sold Over Time
+  </div>
+  <div style="height:280px; position:relative;">
+    <canvas id="salesChart"></canvas>
+  </div>
+</div>
+{% endif %}
+
+<!-- Table -->
+<div class="card">
+  <div style="font-size:13px; color:#475569; margin-bottom:16px;">
+    {{ date_from }} to {{ date_to }} · {{ group_by|title }}
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th style="text-align:right;">Units Sold</th>
+          <th style="text-align:right;">Revenue</th>
+          <th style="text-align:right;">Transactions</th>
+          <th style="text-align:right;">Avg. per Sale</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in history %}
+        <tr>
+          <td class="strong">{{ entry.label }}</td>
+          <td style="text-align:right; font-weight:500;">{{ entry.units_sold }}</td>
+          <td style="text-align:right; color:var(--color-text-success); font-weight:500;">₱{{ entry.revenue|floatformat:2 }}</td>
+          <td style="text-align:right;">{{ entry.transactions }}</td>
+          <td style="text-align:right; color:var(--color-text-secondary);">
+            {% if entry.avg_per_sale > 0 %}
+              {{ entry.avg_per_sale|floatformat:1 }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5" style="text-align:center; padding:32px; color:#475569;">
+            No sales data for this period.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      {% if history %}
+      <tfoot style="border-top:2px solid var(--color-border-secondary); font-weight:600;">
+        <tr>
+          <td>TOTAL</td>
+          <td style="text-align:right;">{{ totals.total_units|default:0 }}</td>
+          <td style="text-align:right; color:var(--color-text-success);">₱{{ totals.total_revenue|default:0|floatformat:2 }}</td>
+          <td style="text-align:right;">{{ totals.total_transactions|default:0 }}</td>
+          <td style="text-align:right;">
+            {% if totals.avg_per_sale > 0 %}
+              {{ totals.avg_per_sale|floatformat:1 }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+
+{% if has_data %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const ctx = document.getElementById('salesChart').getContext('2d');
+const chartLabels = [{% for entry in history %}'{{ entry.label|escapejs }}'{% if not forloop.last %},{% endif %}{% endfor %}];
+const chartData = [{% for entry in history %}{{ entry.units_sold }}{% if not forloop.last %},{% endif %}{% endfor %}];
+const chartRevenue = [{% for entry in history %}{{ entry.revenue|default:0 }}{% if not forloop.last %},{% endif %}{% endfor %}];
+
+new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: chartLabels,
+    datasets: [{
+      label: 'Units Sold',
+      data: chartData,
+      backgroundColor: 'rgba(29, 158, 117, 0.7)',
+      borderColor: '#1D9E75',
+      borderWidth: 1,
+      borderRadius: 4,
+      yAxisID: 'y'
+    }, {
+      label: 'Revenue (₱)',
+      data: chartRevenue,
+      type: 'line',
+      borderColor: '#f59e0b',
+      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+      borderWidth: 2,
+      pointRadius: 3,
+      pointBackgroundColor: '#f59e0b',
+      fill: true,
+      tension: 0.3,
+      yAxisID: 'y1'
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { 
+        position: 'top',
+        labels: { color: 'var(--color-text-primary)', font: { size: 12 } }
+      },
+      tooltip: {
+        backgroundColor: 'var(--color-background-primary)',
+        titleColor: 'var(--color-text-primary)',
+        bodyColor: 'var(--color-text-secondary)',
+        borderColor: 'var(--color-border-secondary)',
+        borderWidth: 1,
+        padding: 10,
+        callbacks: {
+          label: function(context) {
+            if (context.dataset.label === 'Revenue (₱)') {
+              return context.dataset.label + ': ₱' + context.parsed.y.toFixed(2);
+            }
+            return context.dataset.label + ': ' + context.parsed.y;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: { color: 'var(--color-border-tertiary)' },
+        ticks: { color: 'var(--color-text-secondary)', font: { size: 11 } }
+      },
+      y: {
+        type: 'linear',
+        display: true,
+        position: 'left',
+        grid: { color: 'var(--color-border-tertiary)' },
+        ticks: { color: 'var(--color-text-secondary)', font: { size: 11 } },
+        title: { display: true, text: 'Units', color: 'var(--color-text-secondary)', font: { size: 11 } }
+      },
+      y1: {
+        type: 'linear',
+        display: true,
+        position: 'right',
+        grid: { drawOnChartArea: false },
+        ticks: { color: '#f59e0b', font: { size: 11 }, callback: function(value) { return '₱' + value; } },
+        title: { display: true, text: 'Revenue', color: '#f59e0b', font: { size: 11 } }
+      }
+    }
+  }
+});
+</script>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,339 @@
+{% extends 'base.html' %}
+{% block page_title %}Analytics{% endblock %}
+
+{% block topbar_actions %}
+  {% if mode == 'daily' %}
+    <a href="?mode=daily&day={{ selected_date }}&export=csv"
+       class="btn btn-secondary"><i class="bi bi-filetype-csv"></i> Export CSV</a>
+  {% elif mode == 'weekly' %}
+    <a href="?mode=weekly&week={{ selected_week }}&export=csv"
+       class="btn btn-secondary"><i class="bi bi-filetype-csv"></i> Export CSV</a>
+  {% else %}
+    <a href="?mode=monthly&month={{ selected_month }}&year={{ selected_year }}&export=csv"
+       class="btn btn-secondary"><i class="bi bi-filetype-csv"></i> Export CSV</a>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+{# ── Mode Toggle + Filters ──────────────────────────────────── #}
+<div class="card" style="margin-bottom:20px; padding:16px 20px;">
+  <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
+
+    {# Mode Pills #}
+    <div style="display:flex; gap:4px; background:rgba(255,255,255,0.05); border-radius:10px; padding:3px;">
+      {% for m, label in modes %}
+        <a href="?mode={{ m }}"
+           style="padding:6px 16px; border-radius:8px; font-size:13px; font-weight:500;
+                  text-decoration:none; transition:all 0.15s;
+                  {% if mode == m %}
+                    background:#1D9E75; color:#fff;
+                  {% else %}
+                    color:var(--color-text-secondary);
+                  {% endif %}">
+          {{ label }}
+        </a>
+      {% endfor %}
+    </div>
+
+    {# Date Filter — changes by mode #}
+    <form method="get" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end;">
+      <input type="hidden" name="mode" value="{{ mode }}">
+
+      {% if mode == 'daily' %}
+        <input type="date" name="day" value="{{ selected_date }}"
+               style="padding:7px 10px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                      background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+
+      {% elif mode == 'weekly' %}
+        <input type="week" name="week" value="{{ selected_week }}"
+               style="padding:7px 10px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                      background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+
+      {% else %}
+        <select name="month"
+                style="padding:7px 10px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                       background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+          {% for m in months %}
+            <option value="{{ m.value }}" {% if m.value == selected_month %}selected{% endif %}>{{ m.label }}</option>
+          {% endfor %}
+        </select>
+        <select name="year"
+                style="padding:7px 10px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                       background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
+          {% for y in years %}
+            <option value="{{ y }}" {% if y == selected_year %}selected{% endif %}>{{ y }}</option>
+          {% endfor %}
+        </select>
+      {% endif %}
+
+      <button type="submit"
+              style="padding:8px 18px; background:#1D9E75; color:#fff; border:none;
+                     border-radius:8px; font-size:13px; font-weight:500; cursor:pointer;">
+        Apply
+      </button>
+      <a href="?mode={{ mode }}"
+         style="padding:8px 14px; border:0.5px solid var(--color-border-secondary); border-radius:8px;
+                font-size:13px; color:var(--color-text-secondary); text-decoration:none;">
+        {% if mode == 'daily' %}Today{% elif mode == 'weekly' %}This Week{% else %}This Month{% endif %}
+      </a>
+    </form>
+
+    {# Period Label #}
+    <div style="margin-left:auto; text-align:right;">
+      <div style="font-size:13px; font-weight:500; color:var(--color-text-primary);">{{ period_label }}</div>
+      <div style="font-size:11px; color:#64748b; margin-top:2px;">vs {{ prev_period_label }}</div>
+    </div>
+
+  </div>
+</div>
+
+{# ── KPI Cards ──────────────────────────────────────────────── #}
+<div class="stat-grid" style="margin-bottom:20px; grid-template-columns: repeat(3, 1fr);">
+
+  {# Revenue #}
+  <div class="stat-card">
+    <div class="stat-label">Revenue</div>
+    <div class="stat-value">₱{{ curr_revenue|floatformat:2 }}</div>
+    <div class="stat-sub" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+      {% if revenue_delta is not None %}
+        {% if revenue_delta > 0 %}
+          <span style="background:rgba(29,158,117,0.15); color:#1D9E75; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            <i class="bi bi-arrow-up-short"></i>{{ revenue_delta }}%
+          </span>
+        {% elif revenue_delta < 0 %}
+          <span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            <i class="bi bi-arrow-down-short"></i>{{ revenue_delta }}%
+          </span>
+        {% else %}
+          <span style="background:rgba(100,116,139,0.15); color:#64748b; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            → 0%
+          </span>
+        {% endif %}
+        <span style="color:#475569; font-size:11px;">prev ₱{{ prev_revenue|floatformat:2 }}</span>
+      {% else %}
+        <span style="color:#475569; font-size:11px;">No previous data</span>
+      {% endif %}
+    </div>
+    <i class="bi bi-cash-stack stat-icon"></i>
+  </div>
+
+  {# Transactions #}
+  <div class="stat-card">
+    <div class="stat-label">Transactions</div>
+    <div class="stat-value">{{ curr_count }}</div>
+    <div class="stat-sub" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+      {% if count_delta is not None %}
+        {% if count_delta > 0 %}
+          <span style="background:rgba(29,158,117,0.15); color:#1D9E75; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            <i class="bi bi-arrow-up-short"></i>{{ count_delta }}%
+          </span>
+        {% elif count_delta < 0 %}
+          <span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            <i class="bi bi-arrow-down-short"></i>{{ count_delta }}%
+          </span>
+        {% else %}
+          <span style="background:rgba(100,116,139,0.15); color:#64748b; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            → 0%
+          </span>
+        {% endif %}
+        <span style="color:#475569; font-size:11px;">prev {{ prev_count }}</span>
+      {% else %}
+        <span style="color:#475569; font-size:11px;">No previous data</span>
+      {% endif %}
+    </div>
+    <i class="bi bi-receipt stat-icon"></i>
+  </div>
+
+  {# Avg Sale #}
+  <div class="stat-card">
+    <div class="stat-label">Avg. Sale</div>
+    <div class="stat-value">₱{{ curr_avg|floatformat:2 }}</div>
+    <div class="stat-sub" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+      {% if avg_delta is not None %}
+        {% if avg_delta > 0 %}
+          <span style="background:rgba(29,158,117,0.15); color:#1D9E75; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            <i class="bi bi-arrow-up-short"></i>{{ avg_delta }}%
+          </span>
+        {% elif avg_delta < 0 %}
+          <span style="background:rgba(239,68,68,0.15); color:#ef4444; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            <i class="bi bi-arrow-down-short"></i>{{ avg_delta }}%
+          </span>
+        {% else %}
+          <span style="background:rgba(100,116,139,0.15); color:#64748b; padding:2px 7px; border-radius:4px; font-size:11px; font-weight:600;">
+            → 0%
+          </span>
+        {% endif %}
+        <span style="color:#475569; font-size:11px;">prev ₱{{ prev_avg|floatformat:2 }}</span>
+      {% else %}
+        <span style="color:#475569; font-size:11px;">No previous data</span>
+      {% endif %}
+    </div>
+    <i class="bi bi-graph-up stat-icon"></i>
+  </div>
+
+</div>
+
+{# ── Revenue Chart: Current vs Previous ─────────────────────── #}
+<div class="card" style="margin-bottom:20px;">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+    <div style="font-size:14px; font-weight:500;">Revenue comparison</div>
+    <div style="display:flex; gap:16px; font-size:12px; color:#94a3b8;">
+      <span>
+        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px;"></span>
+        {{ period_label }}
+      </span>
+      <span>
+        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#94a3b8;margin-right:4px;"></span>
+        {{ prev_period_label }}
+      </span>
+    </div>
+  </div>
+  <div style="position:relative; width:100%; height:220px;">
+    <canvas id="revenueChart" role="img" aria-label="Revenue comparison chart."></canvas>
+  </div>
+</div>
+
+{# ── Transactions Table ──────────────────────────────────────── #}
+<div class="card">
+  <div style="font-size:13px; color:#475569; margin-bottom:16px;">{{ period_label }}</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Customer</th>
+          {% if mode != 'daily' %}<th>Cashier</th>{% endif %}
+          <th>Total</th>
+          <th>{% if mode == 'daily' %}Time{% else %}Date{% endif %}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sale in sales %}
+        <tr>
+          <td class="strong">#{{ sale.pk }}</td>
+          <td>{{ sale.customer|default:"Walk-in" }}</td>
+          {% if mode != 'daily' %}<td>{{ sale.cashier }}</td>{% endif %}
+          <td class="strong">₱{{ sale.total }}</td>
+          <td>
+            {% if mode == 'daily' %}
+              {{ sale.created_at|date:"H:i" }}
+            {% else %}
+              {{ sale.created_at|date:"M d, Y H:i" }}
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="{% if mode == 'daily' %}4{% else %}5{% endif %}"
+              style="text-align:center; padding:32px; color:#475569;">
+            No sales for this period.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Pagination #}
+  {% if page_obj.has_other_pages %}
+  <div style="display:flex; justify-content:center; align-items:center; gap:6px; margin-top:20px;
+              padding-top:16px; border-top:0.5px solid var(--color-border-secondary);">
+    {% if page_obj.has_previous %}
+      <a href="?mode={{ mode }}{% if mode == 'daily' %}&day={{ selected_date }}{% elif mode == 'weekly' %}&week={{ selected_week }}{% else %}&month={{ selected_month }}&year={{ selected_year }}{% endif %}&page={{ page_obj.previous_page_number }}"
+         style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:6px;
+                font-size:13px; color:var(--color-text-primary); text-decoration:none; background:var(--color-background-secondary);">
+        Prev
+      </a>
+    {% else %}
+      <span style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:6px;
+                   font-size:13px; color:var(--color-text-disabled); background:var(--color-background-secondary); cursor:not-allowed;">
+        Prev
+      </span>
+    {% endif %}
+
+    {% for num in page_obj.paginator.page_range %}
+      {% if num == page_obj.number %}
+        <span style="padding:6px 12px; border-radius:6px; font-size:13px; background:#1D9E75; color:#fff; font-weight:500;">
+          {{ num }}
+        </span>
+      {% else %}
+        <a href="?mode={{ mode }}{% if mode == 'daily' %}&day={{ selected_date }}{% elif mode == 'weekly' %}&week={{ selected_week }}{% else %}&month={{ selected_month }}&year={{ selected_year }}{% endif %}&page={{ num }}"
+           style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:6px;
+                  font-size:13px; color:var(--color-text-primary); text-decoration:none; background:var(--color-background-secondary);">
+          {{ num }}
+        </a>
+      {% endif %}
+    {% endfor %}
+
+    {% if page_obj.has_next %}
+      <a href="?mode={{ mode }}{% if mode == 'daily' %}&day={{ selected_date }}{% elif mode == 'weekly' %}&week={{ selected_week }}{% else %}&month={{ selected_month }}&year={{ selected_year }}{% endif %}&page={{ page_obj.next_page_number }}"
+         style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:6px;
+                font-size:13px; color:var(--color-text-primary); text-decoration:none; background:var(--color-background-secondary);">
+        Next
+      </a>
+    {% else %}
+      <span style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:6px;
+                   font-size:13px; color:var(--color-text-disabled); background:var(--color-background-secondary); cursor:not-allowed;">
+        Next
+      </span>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{# ── Chart.js ───────────────────────────────────────────────── #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const gridColor  = 'rgba(255,255,255,0.06)';
+const labelColor = '#64748b';
+
+new Chart(document.getElementById('revenueChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ chart_labels|safe }},
+    datasets: [
+      {
+        label: '{{ period_label }}',
+        data: {{ chart_curr|safe }},
+        backgroundColor: '#1D9E75',
+        borderRadius: 4,
+        yAxisID: 'y',
+        order: 2,
+      },
+      {
+        label: '{{ prev_period_label }}',
+        data: {{ chart_prev|safe }},
+        type: 'line',
+        borderColor: '#94a3b8',
+        backgroundColor: 'transparent',
+        borderDash: [4, 3],
+        pointBackgroundColor: '#94a3b8',
+        pointRadius: 3,
+        pointBorderWidth: 0,
+        tension: 0.35,
+        yAxisID: 'y',
+        order: 1,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: labelColor, font: { size: 11 } }, grid: { color: gridColor } },
+      y: {
+        ticks: {
+          color: labelColor,
+          font: { size: 11 },
+          callback: v => '₱' + (v >= 1000 ? (v/1000).toFixed(0) + 'k' : v)
+        },
+        grid: { color: gridColor }
+      },
+    }
+  }
+});
+</script>
+
+{% endblock %}

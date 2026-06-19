@@ -1,0 +1,269 @@
+{% extends 'base.html' %}
+{% block page_title %}Sales History{% endblock %}
+{% block content %}
+
+<!-- Filters -->
+<div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+  <form method="get" style="display:flex; gap:10px; flex:1; flex-wrap:wrap;">
+    <input type="text" name="q" value="{{ query }}" placeholder="Search by #, customer, cashier..."
+           style="flex:1; min-width:200px; padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
+    <input type="date" name="date_from" value="{{ date_from }}"
+           style="padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
+    <input type="date" name="date_to" value="{{ date_to }}"
+           style="padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
+    <button type="submit"
+            style="padding:8px 16px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">
+      Filter
+    </button>
+    {% if query or date_from or date_to %}
+    <a href="{% url 'sales:sale_history' %}"
+       style="padding:8px 16px; border:0.5px solid var(--color-border-secondary); border-radius:8px; font-size:14px; color:var(--color-text-secondary); text-decoration:none;">
+      Clear
+    </a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Customer</th><th>Cashier</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for sale in sales %}
+        <tr>
+          <td class="strong">#{{ sale.pk }}</td>
+          <td>{{ sale.customer|default:"Walk-in" }}</td>
+          <td>{{ sale.cashier }}</td>
+          <td style="font-size:12px; color:var(--color-text-secondary);">
+            {% for item in sale.items.all %}
+              {{ item.product.name }} x{{ item.quantity }}{% if not forloop.last %}, {% endif %}
+            {% endfor %}
+          </td>
+          <td class="strong">₱{{ sale.total }}</td>
+          <td>
+            <span class="badge badge-{% if sale.status == 'completed' %}green{% elif sale.status == 'refunded' %}red{% else %}amber{% endif %}">
+              {{ sale.status }}
+            </span>
+          </td>
+          <td>{{ sale.created_at|date:"M d, Y H:i" }}</td>
+          <td style="display:flex; gap:8px; align-items:center;">
+            {% if sale.status == 'completed' %}
+              <button type="button" class="btn btn-danger btn-sm" onclick="openRefundModal({{ sale.pk }})">
+                <i class="bi bi-arrow-counterclockwise"></i> Refund
+              </button>
+              <button type="button"
+                 onclick="openReceiptModal({{ sale.pk }})"
+                 style="display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:6px; border:0.5px solid var(--color-border-secondary); background:transparent; color:var(--color-text-secondary); cursor:pointer; transition:background .15s;"
+                 onmouseover="this.style.background='var(--color-background-secondary)'"
+                 onmouseout="this.style.background='transparent'"
+                 title="Print receipt">
+                <i class="bi bi-printer"></i>
+              </button>
+            {% else %}
+              <span style="font-size:12px; color:#f87171;">Refunded</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" style="text-align:center; padding:32px; color:#475569;">No sales found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination -->
+{% if sales.has_other_pages %}
+<div style="display:flex; justify-content:center; align-items:center; gap:6px; margin-top:20px; font-size:14px;">
+
+  {% if sales.has_previous %}
+  <a href="?q={{ query }}&date_from={{ date_from }}&date_to={{ date_to }}&page={{ sales.previous_page_number }}"
+     style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; color:var(--color-text-primary); text-decoration:none;">
+    ‹ Prev
+  </a>
+  {% endif %}
+
+  {% for num in sales.paginator.page_range %}
+    {% if sales.number == num %}
+    <span style="padding:6px 12px; background:#1D9E75; color:#fff; border-radius:8px;">{{ num }}</span>
+    {% elif num >= sales.number|add:"-2" and num <= sales.number|add:"2" %}
+    <a href="?q={{ query }}&date_from={{ date_from }}&date_to={{ date_to }}&page={{ num }}"
+       style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; color:var(--color-text-primary); text-decoration:none;">
+      {{ num }}
+    </a>
+    {% endif %}
+  {% endfor %}
+
+  {% if sales.has_next %}
+  <a href="?q={{ query }}&date_from={{ date_from }}&date_to={{ date_to }}&page={{ sales.next_page_number }}"
+     style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; color:var(--color-text-primary); text-decoration:none;">
+    Next ›
+  </a>
+  {% endif %}
+
+  <span style="color:var(--color-text-secondary); margin-left:8px;">
+    Page {{ sales.number }} of {{ sales.paginator.num_pages }}
+  </span>
+</div>
+{% endif %}
+
+<!-- Refund Modal -->
+<div id="refundModal" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
+  <div style="background:var(--color-background-primary); border-radius:12px; max-width:520px; width:90%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+
+    <!-- Modal Header -->
+    <div style="padding:20px 24px 0;">
+      <div style="font-size:15px; font-weight:500; color:var(--color-text-primary); margin-bottom:4px;">
+        Refund Sale #<span id="modalSaleId"></span>
+      </div>
+      <div style="font-size:13px; color:var(--color-text-secondary);" id="modalSaleMeta">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- Modal Body -->
+    <div style="padding:20px 24px;">
+      <div style="margin-bottom:20px;">
+        <div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:8px;">Items to be restocked:</div>
+        <div id="modalItems">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:500; color:var(--color-text-primary); margin-bottom:20px;">
+        <span>Total Refund</span>
+        <span>₱<span id="modalTotal"></span></span>
+      </div>
+
+      <div style="font-size:13px; color:#f87171; margin-bottom:4px;">
+        ⚠️ This will mark the sale as refunded and restore all item stock. This cannot be undone.
+      </div>
+    </div>
+
+    <!-- Modal Footer -->
+    <div style="padding:0 24px 24px; display:flex; gap:10px;">
+      <form id="refundForm" method="post" style="display:flex; gap:10px; flex:1;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger" style="flex:1;">
+          <i class="bi bi-arrow-counterclockwise"></i> Confirm Refund
+        </button>
+        <button type="button" class="btn btn-ghost" onclick="closeRefundModal()">Cancel</button>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// Sale data passed from Django
+const salesData = {
+  {% for sale in sales %}
+  {{ sale.pk }}: {
+    date: "{{ sale.created_at|date:'M d, Y H:i' }}",
+    cashier: "{{ sale.cashier|escapejs }}",
+    total: "{{ sale.total }}",
+    items: [
+      {% for item in sale.items.all %}
+      { name: "{{ item.product.name|escapejs }}", qty: {{ item.quantity }}, subtotal: "{{ item.subtotal }}" }{% if not forloop.last %},{% endif %}
+      {% endfor %}
+    ]
+  }{% if not forloop.last %},{% endif %}
+  {% endfor %}
+};
+
+function openRefundModal(saleId) {
+  const sale = salesData[saleId];
+  if (!sale) return;
+
+  document.getElementById('modalSaleId').textContent = saleId;
+  document.getElementById('modalSaleMeta').textContent = sale.date + ' · ' + sale.cashier;
+  document.getElementById('modalTotal').textContent = sale.total;
+
+  // Build items list
+  const itemsContainer = document.getElementById('modalItems');
+  itemsContainer.innerHTML = '';
+  sale.items.forEach(item => {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:13px;';
+    div.innerHTML = `
+      <span style="color:var(--color-text-primary);">${item.name}</span>
+      <span style="color:var(--color-text-secondary);">x${item.qty} · ₱${item.subtotal}</span>
+    `;
+    itemsContainer.appendChild(div);
+  });
+
+  // Set form action
+  document.getElementById('refundForm').action = "{% url 'sales:refund_sale' 0 %}".replace('0', saleId);
+
+  // Show modal
+  const modal = document.getElementById('refundModal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeRefundModal() {
+  const modal = document.getElementById('refundModal');
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// Close on backdrop click
+document.getElementById('refundModal').addEventListener('click', function(e) {
+  if (e.target === this) closeRefundModal();
+});
+
+// Close on Escape key
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { closeRefundModal(); closeReceiptModal(); }
+});
+</script>
+
+<!-- Receipt Modal -->
+<div id="receiptModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:9999; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
+  <div style="width:400px; background:#1e2d3d; border:0.5px solid rgba(255,255,255,0.12); border-radius:12px; overflow:hidden;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#162030; border-bottom:0.5px solid rgba(255,255,255,0.1);">
+      <span style="font-weight:500; font-size:14px; color:#e2e8f0; display:flex; align-items:center; gap:8px;">
+        <i class="bi bi-receipt" style="color:#4ade80;"></i> Receipt
+      </span>
+      <div style="display:flex; gap:8px;">
+        <button onclick="printReceipt()"
+                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
+                       border:0.5px solid rgba(74,222,128,0.35); background:rgba(74,222,128,0.1);
+                       color:#4ade80; font-size:12px; font-weight:500; cursor:pointer;">
+          <i class="bi bi-printer"></i> Print
+        </button>
+        <button onclick="closeReceiptModal()"
+                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
+                       border:0.5px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05);
+                       color:#94a3b8; font-size:12px; font-weight:500; cursor:pointer;">
+          <i class="bi bi-x"></i> Close
+        </button>
+      </div>
+    </div>
+    <iframe id="receiptFrame" style="width:100%; height:520px; border:none; display:block; background:#fff;" src=""></iframe>
+  </div>
+</div>
+
+<script>
+function openReceiptModal(saleId) {
+  const modal = document.getElementById('receiptModal');
+  document.getElementById('receiptFrame').src = '/receipt/' + saleId + '/';
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+}
+function closeReceiptModal() {
+  document.getElementById('receiptModal').style.display = 'none';
+  document.getElementById('receiptFrame').src = '';
+}
+function printReceipt() {
+  document.getElementById('receiptFrame').contentWindow.print();
+}
+document.getElementById('receiptModal').addEventListener('click', function(e) {
+  if (e.target === this) closeReceiptModal();
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Django
+db.sqlite3
+*.sqlite3
+staticfiles/
+media/
+
+# Secrets
+.env
+.env.*
+*.log
+
+# Editors
+.vscode/
+.idea/
+
+# Ngrok / local tunnel
+tunnel.py

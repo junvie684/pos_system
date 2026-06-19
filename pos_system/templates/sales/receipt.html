@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: 80mm auto; margin: 4mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.4;
+    width: 72mm;
+    color: #000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .center { text-align: center; }
+  .divider { border-top: 2px dashed #000; margin: 6px 0; }
+  .row { display: flex; justify-content: space-between; gap: 8px; }
+  .total { font-weight: bold; font-size: 20px; }
+  .change { font-weight: bold; font-size: 15px; }
+  .item-name { font-weight: bold; }
+  .item-sub { padding-left: 8px; color: #000; font-size: 13px; }
+  strong { font-weight: 700; }
+  @media screen { body { max-width: 320px; margin: 20px auto; border: 1px dashed #ccc; padding: 12px; } }
+  @media print {
+    body { width: 100%; }
+  }
+</style>
+</head>
+<body>
+  <div class="center"><strong>{{ tenant.name }}</strong></div>
+  <div class="center">{{ tenant.address }}</div>
+  <div class="center">Tel: {{ tenant.phone }}</div>
+  <div class="center">TIN: {{ tenant.tin }}</div>
+  <div class="divider"></div>
+  <div class="row"><span>Date:</span><span>{{ sale.created_at|date:"Y-m-d H:i" }}</span></div>
+  <div class="row"><span>OR #:</span><span>{{ sale.pk }}</span></div>
+  <div class="row"><span>Cashier:</span><span>{{ sale.cashier }}</span></div>
+  {% if sale.customer %}
+  <div class="row"><span>Customer:</span><span>{{ sale.customer.name }}</span></div>
+  {% endif %}
+  <div class="divider"></div>
+
+  {% for item in sale.items.all %}
+  <div class="row item-name"><span>{{ item.product.name }}</span><span>₱{{ item.subtotal }}</span></div>
+  <div class="item-sub">{{ item.quantity }} x ₱{{ item.unit_price }}</div>
+  {% endfor %}
+
+  <div class="divider"></div>
+  <div class="row total"><span>TOTAL</span><span>₱{{ sale.total }}</span></div>
+
+  <div class="divider"></div>
+  <div class="row"><span>VATable Sale</span><span>₱{{ vatable_sale|floatformat:2 }}</span></div>
+  <div class="row"><span>VAT (12%)</span><span>₱{{ vat_amount|floatformat:2 }}</span></div>
+  <div class="row"><span>VAT-Exempt Sale</span><span>₱0.00</span></div>
+  <div class="row"><span>Zero-Rated Sale</span><span>₱0.00</span></div>
+
+  {% if sale.cash_tendered %}
+  <div class="divider"></div>
+  <div class="row"><span>Cash Tendered</span><span>₱{{ sale.cash_tendered }}</span></div>
+  <div class="row change"><span>Change</span><span>₱{{ sale.change_given }}</span></div>
+  {% endif %}
+
+  <div class="divider"></div>
+  <div class="row"><span>Payment Mode:</span><span>{{ sale.get_payment_method_display }}</span></div>
+  {% if sale.reference_number %}
+  <div class="row"><span>Ref #:</span><span>{{ sale.reference_number }}</span></div>
+  {% endif %}
+
+  <div class="divider"></div>
+  <div class="center" style="margin-top:6px;">{{ sale.status|upper }}</div>
+  <div class="center" style="margin-top: 8px;">Thank you for your purchase!</div>
+  <script>
+  if (window.self === window.top) {
+    window.onload = function() { window.print(); };
+  }
+</script>
+</body>
+</html>

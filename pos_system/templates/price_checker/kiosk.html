@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Price Check</title>
+  {% load static %}
+  <link href="{% static 'icons/bootstrap-icons.css' %}" rel="stylesheet">
+  <style>
+    :root {
+      --navy: #0f1623;
+      --navy2: #161e2e;
+      --navy3: #1e293b;
+      --accent: #10b981;
+      --accent2: #059669;
+      --amber: #f59e0b;
+      --danger: #ef4444;
+      --text: #f1f5f9;
+      --text2: #94a3b8;
+      --text3: #475569;
+      --border: rgba(255,255,255,0.07);
+      --card: #1a2234;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--navy);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .idle-screen {
+      text-align: center;
+      animation: pulse 2.5s infinite;
+    }
+
+    .scan-ring {
+      width: 140px;
+      height: 140px;
+      margin: 0 auto 2.5rem;
+      border: 3px solid var(--accent);
+      border-radius: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .scan-ring i {
+      font-size: 48px;
+      color: var(--accent);
+    }
+
+    .scan-line {
+      position: absolute;
+      width: 70%;
+      height: 2px;
+      background: var(--accent);
+      left: 15%;
+      animation: scanMove 1.8s infinite ease-in-out;
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .idle-screen h1 {
+      font-size: 2.8rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.5px;
+    }
+
+    .idle-screen p {
+      font-size: 1.2rem;
+      color: var(--text2);
+    }
+
+    .result {
+      display: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px 48px;
+      text-align: center;
+      max-width: 700px;
+      width: 90%;
+      animation: fadeUp 0.35s ease both;
+    }
+
+    .result .product-name {
+      font-size: 1.9rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+
+    .result .product-sku {
+      font-size: 0.95rem;
+      color: var(--text3);
+      margin-bottom: 24px;
+      font-family: monospace;
+    }
+
+    .result .price-main {
+      font-size: 4.5rem;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1;
+    }
+
+    .result .price-original {
+      font-size: 1.6rem;
+      color: var(--danger);
+      text-decoration: line-through;
+      margin-top: 12px;
+    }
+
+    .result .savings {
+      font-size: 1.1rem;
+      color: var(--amber);
+      margin-top: 8px;
+      font-weight: 500;
+    }
+
+    .result .stock-badge {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 8px 20px;
+      border-radius: 50px;
+      font-size: 1rem;
+      font-weight: 500;
+    }
+
+    .stock-in { background: rgba(16,185,129,0.15); color: #34d399; }
+    .stock-low { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .stock-out { background: rgba(239,68,68,0.15); color: #f87171; }
+
+    .result .promo-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 16px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 1rem;
+      color: var(--amber);
+      border: 1px solid rgba(245,158,11,0.3);
+      background: rgba(245,158,11,0.08);
+    }
+
+    .not-found {
+      display: none;
+      text-align: center;
+      animation: fadeUp 0.3s ease both;
+    }
+
+    .not-found i {
+      font-size: 5rem;
+      color: var(--danger);
+      margin-bottom: 20px;
+      display: block;
+    }
+
+    .not-found h2 {
+      font-size: 2.2rem;
+      color: var(--danger);
+      margin-bottom: 10px;
+    }
+
+    .not-found p {
+      font-size: 1.2rem;
+      color: var(--text2);
+    }
+
+    .kiosk-footer {
+      position: absolute;
+      bottom: 24px;
+      font-size: 0.85rem;
+      color: var(--text3);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    @keyframes scanMove {
+      0% { top: 20%; opacity: 0; }
+      20% { opacity: 1; }
+      80% { opacity: 1; }
+      100% { top: 80%; opacity: 0; }
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="idle-screen" id="idle">
+    <div class="scan-ring">
+      <i class="bi bi-upc-scan"></i>
+      <div class="scan-line"></div>
+    </div>
+    <h1>Scan to Check Price</h1>
+    <p>Place barcode under the scanner</p>
+  </div>
+
+  <div class="result" id="result">
+    <div class="product-name" id="p-name"></div>
+    <div class="product-sku" id="p-sku"></div>
+    <div class="price-main" id="p-price"></div>
+    <div class="price-original" id="p-original" style="display: none;"></div>
+    <div class="savings" id="p-savings" style="display: none;"></div>
+    <div class="stock-badge" id="p-stock"></div>
+    <div class="promo-tag" id="p-promo" style="display: none;">
+      <i class="bi bi-tag-fill"></i>
+      <span id="p-promo-text"></span>
+    </div>
+  </div>
+
+  <div class="not-found" id="not-found">
+    <i class="bi bi-x-circle"></i>
+    <h2>Product Not Found</h2>
+    <p>Please try scanning again</p>
+  </div>
+
+  <div class="kiosk-footer">Price Checker</div>
+
+  <script>
+    let barcodeBuffer = '';
+    let resetTimer;
+
+    const idle = document.getElementById('idle');
+    const result = document.getElementById('result');
+    const notFound = document.getElementById('not-found');
+
+    function showIdle() {
+      idle.style.display = 'block';
+      result.style.display = 'none';
+      notFound.style.display = 'none';
+    }
+
+    function showResult(data) {
+      idle.style.display = 'none';
+      notFound.style.display = 'none';
+      result.style.display = 'block';
+
+      document.getElementById('p-name').textContent = data.name;
+      document.getElementById('p-sku').textContent = data.sku || '';
+
+      const priceEl = document.getElementById('p-price');
+      const originalEl = document.getElementById('p-original');
+      const savingsEl = document.getElementById('p-savings');
+
+      if (data.discount_price && parseFloat(data.discount_price) < parseFloat(data.price)) {
+        priceEl.textContent = '₱' + formatPrice(data.discount_price);
+        originalEl.textContent = '₱' + formatPrice(data.price);
+        originalEl.style.display = 'block';
+
+        const savings = parseFloat(data.price) - parseFloat(data.discount_price);
+        savingsEl.textContent = 'You save ₱' + formatPrice(savings);
+        savingsEl.style.display = 'block';
+      } else {
+        priceEl.textContent = '₱' + formatPrice(data.price);
+        originalEl.style.display = 'none';
+        savingsEl.style.display = 'none';
+      }
+
+      const stock = parseInt(data.stock) || 0;
+      const stockEl = document.getElementById('p-stock');
+
+      if (stock <= 0) {
+        stockEl.textContent = 'Out of Stock';
+        stockEl.className = 'stock-badge stock-out';
+      } else if (data.low_stock) {
+        stockEl.textContent = 'Low Stock — ' + stock + ' left';
+        stockEl.className = 'stock-badge stock-low';
+      } else {
+        stockEl.textContent = 'In Stock — ' + stock;
+        stockEl.className = 'stock-badge stock-in';
+      }
+
+      const promoEl = document.getElementById('p-promo');
+      if (data.promo_text) {
+        document.getElementById('p-promo-text').textContent = data.promo_text;
+        promoEl.style.display = 'inline-flex';
+      } else {
+        promoEl.style.display = 'none';
+      }
+
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(showIdle, 15000);
+    }
+
+    function showNotFound() {
+      idle.style.display = 'none';
+      result.style.display = 'none';
+      notFound.style.display = 'block';
+
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(showIdle, 5000);
+    }
+
+    function formatPrice(price) {
+      return parseFloat(price).toLocaleString('en-PH', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+
+    document.addEventListener('keypress', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'Enter') {
+        if (barcodeBuffer.length >= 3) {
+          fetch(`/price-check/api/${encodeURIComponent(barcodeBuffer)}/`)
+            .then(r => r.ok ? r.json() : Promise.reject())
+            .then(data => data.found ? showResult(data) : showNotFound())
+            .catch(showNotFound);
+        }
+        barcodeBuffer = '';
+      } else {
+        barcodeBuffer += e.key;
+      }
+
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => { barcodeBuffer = ''; }, 100);
+    });
+
+    window.onload = () => {
+      window.focus();
+      document.body.focus();
+    };
+
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) e.preventDefault();
+    });
+  </script>
+</body>
+</html>

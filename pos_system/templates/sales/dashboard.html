@@ -1,0 +1,278 @@
+{% extends 'base.html' %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+
+{# ── KPI Cards ──────────────────────────────────────────────────── #}
+<div class="stat-grid" style="margin-bottom:20px;">
+  <div class="stat-card">
+    <div class="stat-label">Today's Sale</div>
+    <div class="stat-value">₱{{ total_today|floatformat:2 }}</div>
+    <div class="stat-sub">{{ sales_count_today }} sale{{ sales_count_today|pluralize }} today</div>
+    <i class="bi bi-currency-dollar stat-icon"></i>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Transaction's Today</div>
+    <div class="stat-value">{{ sales_count_today }}</div>
+    <div class="stat-sub">completed transactions</div>
+    <i class="bi bi-receipt stat-icon"></i>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Avg. Sale Today</div>
+    <div class="stat-value">₱{{ avg_sale|floatformat:2 }}</div>
+    <div class="stat-sub">per transaction</div>
+    <i class="bi bi-graph-up stat-icon"></i>
+  </div>
+  <div class="stat-card {% if status_counts.pending > 0 %}{% else %}{% endif %}">
+    <div class="stat-label">Pending Sales</div>
+    <div class="stat-value">{{ status_counts.pending }}</div>
+    <div class="stat-sub">awaiting completion</div>
+    <i class="bi bi-clock-history stat-icon"></i>
+  </div>
+  <div class="stat-card {% if low_stock_count > 0 %}{% else %}{% endif %}">
+    <div class="stat-label">Low Stock Items</div>
+    <div class="stat-value">{{ low_stock_count }}</div>
+    <div class="stat-sub">product{{ low_stock_count|pluralize }} need restocking</div>
+    <i class="bi bi-exclamation-triangle stat-icon"></i>
+  </div>
+</div>
+
+{# ── Revenue Chart ──────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom:20px;">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+    <div style="font-size:14px; font-weight:500;">Sale — last 7 days</div>
+    <div style="display:flex; gap:16px; font-size:12px; color:#94a3b8;">
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px;"></span>Sale (₱)</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#3b82f6;margin-right:4px;"></span>Transactions</span>
+    </div>
+  </div>
+  <div style="position:relative; width:100%; height:220px;">
+    <canvas id="revenueChart"
+            role="img"
+            aria-label="Bar chart showing daily revenue and transaction count over the last 7 days.">
+      Daily sale and transactions for the last 7 days.
+    </canvas>
+  </div>
+</div>
+
+{# ── Middle Row: Top Products + Low Stock ───────────────────────── #}
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+
+  {# Top Products by Revenue #}
+  <div class="card">
+    <div style="font-size:14px; font-weight:500; margin-bottom:16px;">Top products by sale</div>
+    <div style="position:relative; width:100%; height:220px;">
+      <canvas id="productsChart"
+              role="img"
+              aria-label="Horizontal bar chart of top 5 products sorted by total sale.">
+        Top products by sale.
+      </canvas>
+    </div>
+  </div>
+
+  {# Low Stock Alerts #}
+  <div class="card">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+      <div style="font-size:14px; font-weight:500;">Low stock alerts</div>
+      <a href="/products/" style="font-size:12px; color:#3b82f6; text-decoration:none;">
+        Manage <i class="bi bi-arrow-right"></i>
+      </a>
+    </div>
+    {% for product in low_stock %}
+    <div style="display:flex; align-items:center; justify-content:space-between;
+                padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.06);">
+      <div>
+        <div style="font-size:13px; font-weight:500;">{{ product.name }}</div>
+        <div style="font-size:11px; color:#64748b; margin-top:1px;">₱{{ product.price }}</div>
+      </div>
+      {% if product.stock == 0 %}
+        <span class="badge badge-red">Out of stock</span>
+      {% elif product.stock <= 2 %}
+        <span class="badge badge-red">{{ product.stock }} left</span>
+      {% else %}
+        <span class="badge badge-amber">{{ product.stock }} left</span>
+      {% endif %}
+    </div>
+    {% empty %}
+    <div style="text-align:center; padding:32px 0; color:#475569; font-size:13px;">
+      <i class="bi bi-check-circle" style="font-size:24px; display:block; margin-bottom:8px; color:#1D9E75;"></i>
+      All products sufficiently stocked
+    </div>
+    {% endfor %}
+  </div>
+
+</div>
+
+{# ── Bottom Row: Cashier Performance + Status + Units Sold ─────── #}
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+
+  {# Cashier Performance #}
+  <div class="card">
+    <div style="font-size:14px; font-weight:500; margin-bottom:16px;">Cashier performance</div>
+    {% for c in cashier_data %}
+    <div style="margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px;">
+        <span style="font-weight:500;">{{ c.username }}</span>
+        <span style="color:#94a3b8;">₱{{ c.revenue|floatformat:0 }} &middot; {{ c.sales_count }} sales</span>
+      </div>
+      <div style="background:rgba(255,255,255,0.07); border-radius:4px; height:7px; overflow:hidden;">
+        <div style="height:100%; border-radius:4px; background:#1D9E75;
+                    width:{% widthratio c.revenue max_cashier_revenue 100 %}%;
+                    transition: width 0.6s ease;"></div>
+      </div>
+    </div>
+    {% empty %}
+    <div style="color:#475569; font-size:13px;">No cashier data yet.</div>
+    {% endfor %}
+
+    {# Sale Status Donut #}
+    <div style="border-top:0.5px solid rgba(255,255,255,0.06); padding-top:16px; margin-top:4px;">
+      <div style="font-size:13px; color:#94a3b8; margin-bottom:10px;">All-time sale status</div>
+      <div style="display:flex; gap:16px; font-size:12px; color:#94a3b8; margin-bottom:8px;">
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px;"></span>Completed {{ status_counts.completed }}</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#ef4444;margin-right:4px;"></span>Refunded {{ status_counts.refunded }}</span>
+        {% if status_counts.pending %}
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#f59e0b;margin-right:4px;"></span>Pending {{ status_counts.pending }}</span>
+        {% endif %}
+      </div>
+      <div style="position:relative; width:100%; height:130px;">
+        <canvas id="statusChart"
+                role="img"
+                aria-label="Donut chart showing completed, refunded and pending sale counts.">
+          Sale status breakdown.
+        </canvas>
+      </div>
+    </div>
+  </div>
+
+  {# Units Sold #}
+  <div class="card">
+    <div style="font-size:14px; font-weight:500; margin-bottom:16px;">Top products by units sold</div>
+    <div style="position:relative; width:100%; height:340px;">
+      <canvas id="unitsChart"
+              role="img"
+              aria-label="Horizontal bar chart of top 5 products sorted by units sold.">
+        Top products by units sold.
+      </canvas>
+    </div>
+  </div>
+
+</div>
+
+{# ── Chart.js ───────────────────────────────────────────────────── #}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+const gridColor  = 'rgba(255,255,255,0.06)';
+const labelColor = '#64748b';
+
+const chartDefaults = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+};
+
+/* Revenue bar + line */
+new Chart(document.getElementById('revenueChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ chart_days|safe }},
+    datasets: [
+      {
+        label: 'Sale (₱)',
+        data: {{ chart_revenue|safe }},
+        backgroundColor: '#1D9E75',
+        borderRadius: 4,
+        yAxisID: 'y',
+        order: 2,
+      },
+      {
+        label: 'Transactions',
+        data: {{ chart_txns|safe }},
+        type: 'line',
+        borderColor: '#3b82f6',
+        backgroundColor: 'transparent',
+        pointBackgroundColor: '#3b82f6',
+        pointRadius: 4,
+        pointBorderWidth: 0,
+        tension: 0.35,
+        yAxisID: 'y2',
+        order: 1,
+      }
+    ]
+  },
+  options: {
+    ...chartDefaults,
+    scales: {
+      x:  { ticks: { color: labelColor, font: { size: 11 } }, grid: { color: gridColor } },
+      y:  { ticks: { color: labelColor, font: { size: 11 }, callback: v => '₱' + v.toLocaleString() }, grid: { color: gridColor } },
+      y2: { position: 'right', ticks: { color: '#3b82f6', font: { size: 11 } }, grid: { display: false } },
+    }
+  }
+});
+
+/* Top products — horizontal bar */
+new Chart(document.getElementById('productsChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ top_product_labels|safe }},
+    datasets: [{
+      data: {{ top_product_values|safe }},
+      backgroundColor: ['#1D9E75','#1D9E75','#5DCAA5','#5DCAA5','#9FE1CB'],
+      borderRadius: 3,
+    }]
+  },
+  options: {
+    ...chartDefaults,
+    indexAxis: 'y',
+    scales: {
+      x: { ticks: { color: labelColor, font: { size: 11 }, callback: v => '₱' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v) }, grid: { color: gridColor } },
+      y: { ticks: { color: labelColor, font: { size: 11 } }, grid: { display: false } },
+    }
+  }
+});
+
+/* Status donut */
+new Chart(document.getElementById('statusChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ['Completed', 'Refunded', 'Pending'],
+    datasets: [{
+      data: [
+        {{ status_counts.completed }},
+        {{ status_counts.refunded }},
+        {{ status_counts.pending }},
+      ],
+      backgroundColor: ['#1D9E75', '#ef4444', '#f59e0b'],
+      borderWidth: 0,
+      hoverOffset: 4,
+    }]
+  },
+  options: {
+    ...chartDefaults,
+    cutout: '68%',
+  }
+});
+
+/* Units sold — horizontal bar */
+new Chart(document.getElementById('unitsChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ top_units_labels|safe }},
+    datasets: [{
+      data: {{ top_units_values|safe }},
+      backgroundColor: '#3b82f6',
+      borderRadius: 3,
+    }]
+  },
+  options: {
+    ...chartDefaults,
+    indexAxis: 'y',
+    scales: {
+      x: { ticks: { color: labelColor, font: { size: 11 } }, grid: { color: gridColor } },
+      y: { ticks: { color: labelColor, font: { size: 11 } }, grid: { display: false } },
+    }
+  }
+});
+</script>
+
+{% endblock %}

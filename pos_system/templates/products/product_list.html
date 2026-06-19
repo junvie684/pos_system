@@ -1,0 +1,684 @@
+{% extends 'base.html' %}
+{% block title %}Products — POS{% endblock %}
+{% block page_title %}Products{% endblock %}
+
+{% block topbar_actions %}
+  <div style="display:flex; gap:10px; align-items:center;">
+    <button class="btn btn-primary" onclick="openModal('modal-add'); resetAddForm();">
+      <i class="bi bi-plus-lg"></i> Add Product
+    </button>
+    {% if show_inactive %}
+      <a href="{% url 'products:product_list' %}{% if search %}?q={{ search }}{% endif %}"
+         class="btn btn-ghost"
+         style="background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.2);">
+        <i class="bi bi-eye-fill"></i> Show Active
+      </a>
+    {% else %}
+      <a href="?show_inactive=1{% if search %}&q={{ search }}{% endif %}"
+         class="btn btn-ghost">
+        <i class="bi bi-eye-slash"></i> Show Inactive
+      </a>
+    {% endif %}
+  </div>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── ALERT TOAST ─────────────────────────────────── -->
+<div id="toast" style="display:none;position:fixed;top:24px;right:24px;z-index:9999;min-width:300px;max-width:400px;padding:14px 18px;border-radius:10px;align-items:center;gap:12px;font-size:13.5px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.3);">
+  <i id="toast-icon" style="font-size:18px;flex-shrink:0;"></i>
+  <span id="toast-msg"></span>
+  <button onclick="document.getElementById('toast').style.display='none'" style="margin-left:auto;background:none;border:none;color:inherit;opacity:.6;cursor:pointer;font-size:16px;padding:0;">✕</button>
+</div>
+
+<!-- Search -->
+<form method="get" id="search-form" style="margin-bottom:16px;">
+  <div style="position:relative; max-width:320px;">
+    <i class="bi bi-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--color-text-tertiary); font-size:13px;"></i>
+    <input type="text" name="q" id="search-input" placeholder="Search products..."
+           value="{{ search }}"
+           oninput="debounceSearch()"
+           style="width:100%; padding:8px 12px 8px 32px; border:0.5px solid var(--color-border-secondary);
+                  border-radius:8px; background:var(--color-background-primary);
+                  color:var(--color-text-primary); font-size:13px; box-sizing:border-box;">
+  </div>
+</form>
+
+<!-- Table -->
+<div class="card">
+  <div style="margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-size:15px;font-weight:600;color:var(--text);">Product Inventory</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:2px;">Manage products and stock</div>
+    </div>
+    <span class="badge badge-blue" id="product-count">{{ products.paginator.count }} product{{ products.paginator.count|pluralize }}</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Category</th>
+          <th>Barcode</th>
+          <th>Price</th>
+          <th>Stock</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="product-tbody">
+        {% for p in products %}
+        <tr id="product-row-{{ p.pk }}" data-barcode="{{ p.barcode|default:'' }}">
+          <td class="strong row-name">{{ p.name }}</td>
+          <td class="row-category">{{ p.category|default:"—" }}</td>
+          <td class="strong row-name">{{ p.barcode }}</td>
+          <td class="strong row-price">₱{{ p.price }}</td>
+         <td class="row-stock">
+            {% if not p.is_active %}
+                <span class="badge badge-red"><i class="bi bi-eye-slash"></i> Inactive</span>
+            {% elif p.is_in_stock %}
+                <span class="badge badge-green">{{ p.stock }} in stock</span>
+            {% else %}
+                <span class="badge badge-red">Out of stock</span>
+            {% endif %}
+        </td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              {% if show_inactive %}
+                <button class="btn btn-primary btn-sm" onclick="reactivateProduct({{ p.pk }})">
+                  <i class="bi bi-arrow-counterclockwise"></i> Reactivate
+                </button>
+              {% else %}
+                <button class="btn btn-warning btn-sm" onclick="openEditModal({{ p.pk }})">
+                  <i class="bi bi-pencil"></i> Edit
+                </button>
+                <!-- NEW: History link -->
+                <a href="{% url 'products:product_history' p.pk %}"
+                   class="btn btn-ghost btn-sm"
+                   style="display:inline-flex; align-items:center; gap:4px; text-decoration:none;">
+                  <i class="bi bi-graph-up"></i> History
+                </a>
+                <button class="btn btn-danger btn-sm" onclick="openDelModal({{ p.pk }})">
+                  <i class="bi bi-trash"></i>
+                </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr id="empty-row">
+          <td colspan="6" style="text-align:center; padding:32px; color:#475569;">
+            <i class="bi bi-box" style="font-size:32px;display:block;margin-bottom:8px;"></i>No products yet. Add one!
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if products.paginator.num_pages > 1 %}
+  <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px;
+              border-top:0.5px solid var(--color-border-tertiary); flex-wrap:wrap; gap:10px;">
+
+    <div style="font-size:12px; color:var(--color-text-secondary);">
+      Showing
+      <strong style="color:var(--color-text-primary);">{{ products.start_index }}–{{ products.end_index }}</strong>
+      of
+      <strong style="color:var(--color-text-primary);">{{ products.paginator.count }}</strong>
+      products
+    </div>
+
+    <div style="display:flex; align-items:center; gap:4px;">
+      {% if products.has_previous %}
+        <a href="?page={{ products.previous_page_number }}{% if search %}&q={{ search }}{% endif %}"
+           style="padding:6px 10px; border:0.5px solid var(--color-border-secondary); border-radius:7px;
+                  background:var(--color-background-primary); color:var(--color-text-primary);
+                  font-size:13px; text-decoration:none; display:flex; align-items:center; gap:4px;">
+          <i class="bi bi-chevron-left" style="font-size:11px;"></i> Prev
+        </a>
+      {% else %}
+        <span style="padding:6px 10px; border:0.5px solid var(--color-border-tertiary); border-radius:7px;
+                     background:var(--color-background-secondary); color:var(--color-text-tertiary);
+                     font-size:13px; display:flex; align-items:center; gap:4px; cursor:default;">
+          <i class="bi bi-chevron-left" style="font-size:11px;"></i> Prev
+        </span>
+      {% endif %}
+
+      {% for num in products.paginator.page_range %}
+        {% if num == products.number %}
+          <span style="padding:6px 11px; border-radius:7px; background:#1D9E75;
+                       color:#fff; font-size:13px; font-weight:500; min-width:32px; text-align:center;">
+            {{ num }}
+          </span>
+        {% elif num >= products.number|add:"-2" and num <= products.number|add:"2" %}
+          <a href="?page={{ num }}{% if search %}&q={{ search }}{% endif %}"
+             style="padding:6px 11px; border:0.5px solid var(--color-border-secondary); border-radius:7px;
+                    background:var(--color-background-primary); color:var(--color-text-primary);
+                    font-size:13px; text-decoration:none; min-width:32px; text-align:center;">
+            {{ num }}
+          </a>
+        {% elif num == 1 or num == products.paginator.num_pages %}
+          {% if num == 1 and products.number > 4 %}
+            <a href="?page=1{% if search %}&q={{ search }}{% endif %}"
+               style="padding:6px 11px; border:0.5px solid var(--color-border-secondary); border-radius:7px;
+                      background:var(--color-background-primary); color:var(--color-text-primary);
+                      font-size:13px; text-decoration:none; min-width:32px; text-align:center;">1</a>
+            <span style="padding:6px 4px; color:var(--color-text-tertiary); font-size:13px;">…</span>
+          {% endif %}
+          {% if num == products.paginator.num_pages and products.number < products.paginator.num_pages|add:"-3" %}
+            <span style="padding:6px 4px; color:var(--color-text-tertiary); font-size:13px;">…</span>
+            <a href="?page={{ num }}{% if search %}&q={{ search }}{% endif %}"
+               style="padding:6px 11px; border:0.5px solid var(--color-border-secondary); border-radius:7px;
+                      background:var(--color-background-primary); color:var(--color-text-primary);
+                      font-size:13px; text-decoration:none; min-width:32px; text-align:center;">{{ num }}</a>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+
+      {% if products.has_next %}
+        <a href="?page={{ products.next_page_number }}{% if search %}&q={{ search }}{% endif %}"
+           style="padding:6px 10px; border:0.5px solid var(--color-border-secondary); border-radius:7px;
+                  background:var(--color-background-primary); color:var(--color-text-primary);
+                  font-size:13px; text-decoration:none; display:flex; align-items:center; gap:4px;">
+          Next <i class="bi bi-chevron-right" style="font-size:11px;"></i>
+        </a>
+      {% else %}
+        <span style="padding:6px 10px; border:0.5px solid var(--color-border-tertiary); border-radius:7px;
+                     background:var(--color-background-secondary); color:var(--color-text-tertiary);
+                     font-size:13px; display:flex; align-items:center; gap:4px; cursor:default;">
+          Next <i class="bi bi-chevron-right" style="font-size:11px;"></i>
+        </span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- MODAL: ADD PRODUCT                               -->
+<!-- ════════════════════════════════════════════════ -->
+<div class="modal-backdrop" id="modal-add">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:32px;height:32px;border-radius:8px;background:rgba(16,185,129,0.15);display:flex;align-items:center;justify-content:center;color:var(--accent);"><i class="bi bi-plus-lg"></i></div>
+        <span style="font-weight:600;font-size:14px;">Add New Product</span>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-add')"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div style="padding:20px;">
+      <div id="add-alert" style="display:none;" class="alert alert-error"><i class="bi bi-x-circle"></i> <span id="add-alert-msg"></span></div>
+      <div class="form-group">
+        <label class="form-label">Product Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="add-name" class="form-control" placeholder="e.g. Coca-Cola 1L">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select id="add-category" class="form-control">
+          <option value="">— Select Category —</option>
+          {% for cat in categories %}
+          <option value="{{ cat.pk }}">{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Price (₱) <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="add-price" class="form-control" placeholder="0.00" step="0.01" min="0">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Stock <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="add-stock" class="form-control" placeholder="0" min="0">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">  <!-- ADD THIS -->
+          <label class="form-label">Barcode</label>
+          <input type="text" id="add-barcode" class="form-control" placeholder="e.g. 123456789">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Product Image</label>
+        <input type="file" id="add-image" class="form-control" accept="image/*">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" id="add-btn" onclick="submitAdd()"><i class="bi bi-check-lg"></i> Add Product</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-add')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- MODAL: EDIT PRODUCT                              -->
+<!-- ════════════════════════════════════════════════ -->
+<div class="modal-backdrop" id="modal-edit">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:32px;height:32px;border-radius:8px;background:rgba(245,158,11,0.15);display:flex;align-items:center;justify-content:center;color:#fbbf24;"><i class="bi bi-pencil"></i></div>
+        <span style="font-weight:600;font-size:14px;">Edit Product — <span id="edit-title" style="color:var(--accent);"></span></span>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-edit')"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div style="padding:20px;">
+      <input type="hidden" id="edit-pk">
+      <div id="edit-alert" style="display:none;" class="alert alert-error"><i class="bi bi-x-circle"></i> <span id="edit-alert-msg"></span></div>
+      <div class="form-group">
+        <label class="form-label">Product Name <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="edit-name" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Category</label>
+        <select id="edit-category" class="form-control">
+          <option value="">— Select Category —</option>
+          {% for cat in categories %}
+          <option value="{{ cat.pk }}">{{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Price (₱) <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="edit-price" class="form-control" step="0.01" min="0">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Stock <span style="color:var(--danger)">*</span></label>
+          <input type="number" id="edit-stock" class="form-control" min="0">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">  <!-- ADD THIS -->
+          <label class="form-label">Barcode</label>
+          <input type="text" id="edit-barcode" class="form-control" placeholder="e.g. 123456789">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0;">
+        <label class="form-label">Product Image</label>
+        <input type="file" id="edit-image" class="form-control" accept="image/*">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-warning" id="edit-btn" onclick="submitEdit()"><i class="bi bi-check-lg"></i> Save Changes</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-edit')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- MODAL: DELETE CONFIRM                            -->
+<!-- ════════════════════════════════════════════════ -->
+<div class="modal-backdrop" id="modal-del">
+  <div class="modal-box" style="max-width:420px;">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:32px;height:32px;border-radius:8px;background:rgba(239,68,68,0.15);display:flex;align-items:center;justify-content:center;color:#f87171;"><i class="bi bi-trash"></i></div>
+        <span style="font-weight:600;font-size:14px;color:#f87171;">Delete Product</span>
+      </div>
+      <button class="modal-close" onclick="closeModal('modal-del')"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div style="padding:28px 20px;text-align:center;">
+      <input type="hidden" id="del-pk">
+      <div id="del-alert" style="display:none;" class="alert alert-error"><i class="bi bi-x-circle"></i> <span id="del-alert-msg"></span></div>
+      <i class="bi bi-exclamation-triangle" style="font-size:48px;color:#f87171;display:block;margin-bottom:14px;"></i>
+      <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px;">
+        Delete "<span id="del-name" style="color:#f87171;"></span>"?
+      </div>
+      <div style="font-size:13px;color:var(--text3);">This action cannot be undone. The product will be permanently removed.</div>
+    </div>
+    <div class="modal-footer" style="justify-content:center;">
+      <button class="btn btn-danger" id="del-btn" onclick="submitDel()"><i class="bi bi-trash"></i> Yes, Delete</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-del')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ── CSRF Token from cookie ────────────────────────────
+function getCookie(name) {
+  var cookieValue = null;
+  if (document.cookie && document.cookie !== '') {
+    var cookies = document.cookie.split(';');
+    for (var i = 0; i < cookies.length; i++) {
+      var cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
+      }
+    }
+  }
+  return cookieValue;
+}
+var CSRF = getCookie('csrftoken');
+
+/* ── Modal helpers ─────────────────────────────── */
+function openModal(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.add('open');
+}
+function closeModal(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.remove('open');
+}
+
+document.querySelectorAll('.modal-backdrop').forEach(function(el) {
+  el.addEventListener('click', function(e) { if (e.target === el) closeModal(el.id); });
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop.open').forEach(function(el) { closeModal(el.id); });
+});
+
+/* ── Toast alert ───────────────────────────────── */
+var toastTimer;
+function showToast(msg, type) {
+  type = type || 'success';
+  var toast = document.getElementById('toast');
+  var icon  = document.getElementById('toast-icon');
+  var text  = document.getElementById('toast-msg');
+  var colors = {
+    success: { bg: 'rgba(16,185,129,0.18)', border: 'rgba(16,185,129,0.35)', color: '#34d399', icon: 'bi bi-check-circle-fill' },
+    error:   { bg: 'rgba(239,68,68,0.18)',  border: 'rgba(239,68,68,0.35)',  color: '#f87171', icon: 'bi bi-x-circle-fill' },
+    warning: { bg: 'rgba(245,158,11,0.18)', border: 'rgba(245,158,11,0.35)', color: '#fbbf24', icon: 'bi bi-exclamation-triangle-fill' },
+  };
+  var c = colors[type] || colors.success;
+  toast.style.cssText = 'display:flex;position:fixed;top:24px;right:24px;z-index:9999;min-width:300px;max-width:400px;padding:14px 18px;border-radius:10px;align-items:center;gap:12px;font-size:13.5px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.35);background:' + c.bg + ';border:1px solid ' + c.border + ';color:' + c.color + ';';
+  icon.className = c.icon;
+  icon.style.cssText = 'font-size:18px;flex-shrink:0;';
+  text.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity .4s';
+    setTimeout(function() {
+      toast.style.display = 'none';
+      toast.style.opacity = '';
+      toast.style.transition = '';
+    }, 400);
+  }, 4000);
+}
+
+/* ── Inline modal alert ────────────────────────── */
+function showModalAlert(prefix, msg) {
+  var al = document.getElementById(prefix + '-alert');
+  var ms = document.getElementById(prefix + '-alert-msg');
+  if (!al || !ms) return;
+  ms.textContent = msg;
+  al.style.display = 'flex';
+}
+function clearModalAlert(prefix) {
+  var al = document.getElementById(prefix + '-alert');
+  if (al) al.style.display = 'none';
+}
+
+/* ── Loading state ─────────────────────────────── */
+function setLoading(btnId, loading) {
+  var btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = loading;
+  if (loading) {
+    btn._orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Please wait…';
+  } else {
+    btn.innerHTML = btn._orig;
+  }
+}
+
+/* ── AJAX post with FormData ───────────────────── */
+async function postForm(url, formData) {
+  formData.append('csrfmiddlewaretoken', CSRF);
+  var headers = {'X-Requested-With': 'XMLHttpRequest'};
+  if (CSRF) headers['X-CSRFToken'] = CSRF;
+
+  var res = await fetch(url, {
+    method: 'POST',
+    headers: headers,
+    body: formData,
+    credentials: 'same-origin'
+  });
+
+  if (!res.ok) {
+    var text = await res.text();
+    throw new Error('HTTP ' + res.status + ': ' + text.substring(0, 200));
+  }
+
+  var contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    var text = await res.text();
+    throw new Error('Expected JSON but got: ' + text.substring(0, 200));
+  }
+
+  return res.json();
+}
+
+/* ── Format errors ─────────────────────────────── */
+function formatErrors(errors) {
+  if (typeof errors === 'string') return errors;
+  return Object.entries(errors).map(function([f, errs]) {
+    return errs.map(function(e) { return f === '__all__' ? e : f + ': ' + e; }).join(', ');
+  }).join(' | ');
+}
+
+function updateCount() {
+  var n = document.querySelectorAll('#product-tbody tr[id^="product-row-"]').length;
+  document.getElementById('product-count').textContent = n + ' product' + (n !== 1 ? 's' : '');
+}
+
+function stockBadge(stock, isActive) {
+    if (isActive === false) return '<span class="badge badge-red"><i class="bi bi-eye-slash"></i> Inactive</span>';
+    if (stock > 0) return '<span class="badge badge-green">' + stock + ' in stock</span>';
+    return '<span class="badge badge-red">Out of stock</span>';
+}
+
+function escapeHtml(text) {
+  var div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/* ── Debounced search ──────────────────────────── */
+var searchTimer = null;
+function debounceSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(function() {
+    document.getElementById('search-form').submit();
+  }, 400);
+}
+
+
+/* ════════════════════════════════════════════════ */
+/* ADD PRODUCT                                      */
+/* ════════════════════════════════════════════════ */
+function resetAddForm() {
+  ['add-name','add-price','add-stock','add-barcode'].forEach(function(id) {  // ← ADD add-barcode
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('add-category').value = '';
+  document.getElementById('add-image').value = '';
+  clearModalAlert('add');
+}
+
+async function submitAdd() {
+  clearModalAlert('add');
+  setLoading('add-btn', true);
+  try {
+    var fd = new FormData();
+    fd.append('name', document.getElementById('add-name').value);
+    fd.append('category', document.getElementById('add-category').value);
+    fd.append('price', document.getElementById('add-price').value);
+    fd.append('stock', document.getElementById('add-stock').value);
+    fd.append('barcode', document.getElementById('add-barcode').value);  // ← ADD THIS
+    var img = document.getElementById('add-image').files[0];
+    if (img) fd.append('image', img);
+
+    var data = await postForm('/products/add/', fd);
+
+    if (data.success) {
+      closeModal('modal-add');
+      appendProductRow(data.product);
+      updateCount();
+      showToast('✓ Product "' + data.product.name + '" added successfully.', 'success');
+    } else {
+      showModalAlert('add', formatErrors(data.errors));
+    }
+  } catch(e) {
+    console.error('Add product error:', e);
+    showModalAlert('add', e.message || 'Something went wrong. Please try again.');
+  }
+  setLoading('add-btn', false);
+}
+
+function appendProductRow(p) {
+    var empty = document.getElementById('empty-row');
+    if (empty) empty.remove();
+    var tbody = document.getElementById('product-tbody');
+    var tr = document.createElement('tr');
+    tr.id = 'product-row-' + p.pk;
+    tr.dataset.barcode = p.barcode || '';
+    tr.innerHTML =
+        '<td class="strong row-name">' + escapeHtml(p.name) + '</td>' +
+        '<td class="row-category">' + escapeHtml(p.category || '—') + '</td>' +
+        '<td class="strong row-price">₱' + p.price + '</td>' +
+        '<td class="row-stock">' + stockBadge(p.stock, p.is_active) + '</td>' +
+        '<td>' +
+            '<div style="display:flex; gap:6px;">' +
+                '<button class="btn btn-warning btn-sm" onclick="openEditModal(' + p.pk + ')"><i class="bi bi-pencil"></i> Edit</button>' +
+                '<button class="btn btn-danger btn-sm" onclick="openDelModal(' + p.pk + ')"><i class="bi bi-trash"></i></button>' +
+            '</div>' +
+        '</td>';
+    tbody.appendChild(tr);
+}
+
+
+/* ════════════════════════════════════════════════ */
+/* EDIT PRODUCT                                     */
+/* ════════════════════════════════════════════════ */
+function openEditModal(pk) {
+    var row = document.getElementById('product-row-' + pk);
+    if (!row) return;
+    var name = row.querySelector('.row-name').textContent;
+    var categoryCell = row.querySelector('.row-category');
+    var categoryName = categoryCell.textContent.trim();
+    var priceText = row.querySelector('.row-price').textContent.replace('₱', '');
+    var stockBadgeEl = row.querySelector('.row-stock .badge');
+    var stock = stockBadgeEl ? parseInt(stockBadgeEl.textContent) || 0 : 0;
+    var barcode = row.dataset.barcode || '';
+
+    var categoryId = '';
+    var catOptions = document.getElementById('edit-category').options;
+    for (var i = 0; i < catOptions.length; i++) {
+        if (catOptions[i].text === categoryName) {
+            categoryId = catOptions[i].value;
+            break;
+        }
+    }
+
+    document.getElementById('edit-pk').value = pk;
+    document.getElementById('edit-title').textContent = name;
+    document.getElementById('edit-name').value = name;
+    document.getElementById('edit-category').value = categoryId;
+    document.getElementById('edit-price').value = priceText;
+    document.getElementById('edit-stock').value = stock;
+    document.getElementById('edit-barcode').value = barcode;
+    document.getElementById('edit-image').value = '';
+    clearModalAlert('edit');
+    openModal('modal-edit');
+}
+
+async function submitEdit() {
+  clearModalAlert('edit');
+  var pk = document.getElementById('edit-pk').value;
+  setLoading('edit-btn', true);
+  try {
+    var fd = new FormData();
+    fd.append('name', document.getElementById('edit-name').value);
+    fd.append('category', document.getElementById('edit-category').value);
+    fd.append('price', document.getElementById('edit-price').value);
+    fd.append('stock', document.getElementById('edit-stock').value);
+    fd.append('barcode', document.getElementById('edit-barcode').value);  // ← ADD THIS
+    var img = document.getElementById('edit-image').files[0];
+    if (img) fd.append('image', img);
+
+    var data = await postForm('/products/edit/' + pk + '/', fd);
+
+    if (data.success) {
+      closeModal('modal-edit');
+      refreshRow(data.product);
+      showToast('✓ Product "' + data.product.name + '" updated successfully.', 'success');
+    } else {
+      showModalAlert('edit', formatErrors(data.errors));
+    }
+  } catch(e) {
+    console.error('Edit product error:', e);
+    showModalAlert('edit', e.message || 'Something went wrong. Please try again.');
+  }
+  setLoading('edit-btn', false);
+}
+
+function refreshRow(p) {
+    var row = document.getElementById('product-row-' + p.pk);
+    if (!row) return;
+    row.querySelector('.row-name').textContent = p.name;
+    row.querySelector('.row-category').textContent = p.category || '—';
+    row.querySelector('.row-price').textContent = '₱' + p.price;
+    row.querySelector('.row-stock').innerHTML = stockBadge(p.stock, p.is_active);
+    row.dataset.barcode = p.barcode || '';
+}
+
+/* ════════════════════════════════════════════════ */
+/* DELETE PRODUCT                                   */
+/* ════════════════════════════════════════════════ */
+function openDelModal(pk) {
+  var row = document.getElementById('product-row-' + pk);
+  var name = row ? row.querySelector('.row-name').textContent : '';
+  document.getElementById('del-pk').value = pk;
+  document.getElementById('del-name').textContent = name;
+  clearModalAlert('del');
+  openModal('modal-del');
+}
+
+async function submitDel() {
+  clearModalAlert('del');
+  var pk = document.getElementById('del-pk').value;
+  setLoading('del-btn', true);
+  try {
+    var fd = new FormData();
+    var data = await postForm('/products/delete/' + pk + '/', fd);
+    if (data.success) {
+      closeModal('modal-del');
+      var row = document.getElementById('product-row-' + pk);
+      if (row) row.remove();
+      updateCount();
+      showToast('✓ Product "' + data.name + '" has been deleted.', 'success');
+    } else {
+      showModalAlert('del', formatErrors(data.errors));
+    }
+  } catch(e) {
+    console.error('Delete product error:', e);
+    showModalAlert('del', e.message || 'Something went wrong. Please try again.');
+  }
+  setLoading('del-btn', false);
+}
+
+/* ════════════════════════════════════════════════ */
+/* REACTIVATE PRODUCT                                   */
+/* ════════════════════════════════════════════════ */
+  async function reactivateProduct(pk) {
+  try {
+    var fd = new FormData();
+    var data = await postForm('/products/reactivate/' + pk + '/', fd);
+    if (data.success) {
+      var row = document.getElementById('product-row-' + pk);
+      if (row) row.remove();
+      updateCount();
+      showToast('✓ Product "' + data.name + '" reactivated.', 'success');
+    } else {
+      showToast('Failed to reactivate: ' + formatErrors(data.errors), 'error');
+    }
+  } catch(e) {
+    console.error('Reactivate error:', e);
+    showToast('Something went wrong.', 'error');
+  }
+}
+</script>
+
+{% endblock %}

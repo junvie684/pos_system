@@ -1,0 +1,168 @@
+{% extends 'platform_admin/base.html' %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block topbar_actions %}
+  {% if perms.tenants.add_tenant %}
+    <button class="btn btn-primary btn-sm" onclick="openModal('newStoreModal')">
+      <i class="bi bi-plus-circle"></i> New Store
+    </button>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div class="stat-grid">
+  <div class="stat-card green">
+    <div class="stat-label">Total Stores</div>
+    <div class="stat-value">{{ total_stores }}</div>
+    <i class="bi bi-shop stat-icon"></i>
+  </div>
+  <div class="stat-card blue">
+    <div class="stat-label">Active Stores</div>
+    <div class="stat-value">{{ active_stores }}</div>
+    <i class="bi bi-check-circle stat-icon"></i>
+  </div>
+</div>
+
+<div class="card" style="padding:0">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Store</th>
+          <th>Slug</th>
+          <th>Owner</th>
+          <th>Users</th>
+          <th>Sales</th>
+          <th>Products</th>
+          <th>Status</th>
+          <th>Registered</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in stats %}
+        <tr>
+          <td class="strong">{{ s.tenant.name }}</td>
+          <td><code style="color:var(--text3);font-size:12px">{{ s.tenant.slug }}</code></td>
+          <td>{{ s.tenant.owner }}</td>
+          <td>{{ s.user_count }}</td>
+          <td>{{ s.sale_count }}</td>
+          <td>{{ s.product_count }}</td>
+          <td>
+            {% if s.tenant.is_active %}
+              <span class="badge badge-green">Active</span>
+            {% else %}
+              <span class="badge badge-gray">Inactive</span>
+            {% endif %}
+          </td>
+          <td>{{ s.tenant.created_at|date:"M d, Y" }}</td>
+          <td>
+            <a href="{% url 'platform_admin:store_detail' s.tenant.id %}"
+               style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;
+                      border-radius:8px;font-size:12px;font-weight:500;
+                      background:rgba(255,255,255,0.06);color:var(--text2);
+                      border:1px solid var(--border);text-decoration:none;
+                      transition:all .15s"
+               onmouseover="this.style.background='rgba(255,255,255,0.1)';this.style.color='var(--text)'"
+               onmouseout="this.style.background='rgba(255,255,255,0.06)';this.style.color='var(--text2)'">
+              Manage
+            </a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">
+            No stores registered yet.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════ NEW STORE MODAL ══════════════ -->
+<div class="modal-backdrop" id="newStoreModal">
+  <div class="modal-box" style="max-width:620px">
+    <form method="post" action="{% url 'platform_admin:create_store' %}">
+      {% csrf_token %}
+      <div class="modal-header">
+        <div style="font-size:14px;font-weight:600;color:var(--text)">
+          <i class="bi bi-shop" style="color:var(--accent);margin-right:6px"></i>
+          Create New Store
+        </div>
+        <button type="button" class="modal-close" onclick="closeModal('newStoreModal')">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;--form-gap:12px">
+
+          <!-- Row 1: Store Name (full width) -->
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Store Name</label>
+            <input type="text" name="name" class="form-control" placeholder="e.g. Downtown Branch" required>
+          </div>
+
+          <!-- Row 2: Slug (full width) -->
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Slug <span style="color:var(--text3)">(auto-generated if empty)</span></label>
+            <input type="text" name="slug" class="form-control" placeholder="e.g. downtown-branch">
+          </div>
+
+          <!-- Row 3: Address (full width) -->
+          <div class="form-group" style="grid-column:1/-1">
+            <label class="form-label">Address</label>
+            <input type="text" name="address" class="form-control" placeholder="e.g. 123 Main St, Cebu City">
+          </div>
+
+          <!-- Row 4: Phone | TIN -->
+          <div class="form-group">
+            <label class="form-label">Phone</label>
+            <input type="text" name="phone" class="form-control" placeholder="e.g. 032-123-4567">
+          </div>
+          <div class="form-group">
+            <label class="form-label">TIN</label>
+            <input type="text" name="tin" class="form-control" placeholder="e.g. 123-456-789-000">
+          </div>
+
+          <!-- Row 5: Owner Email | Owner Password -->
+          <div class="form-group">
+            <label class="form-label">Owner Email</label>
+            <input type="email" name="owner_email" class="form-control" placeholder="owner@example.com" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Owner Password</label>
+            <input type="password" name="owner_password" class="form-control" placeholder="Set owner password" required>
+          </div>
+
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeModal('newStoreModal')">Cancel</button>
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-plus-circle"></i> Create Store
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  function openModal(id) {
+    document.getElementById(id).classList.add('open');
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('open');
+  }
+
+  // Close on backdrop click
+  document.querySelectorAll('.modal-backdrop').forEach(el => {
+    el.addEventListener('click', function(e) {
+      if (e.target === this) closeModal(this.id);
+    });
+  });
+</script>
+
+{% endblock %}

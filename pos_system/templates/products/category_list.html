@@ -1,0 +1,379 @@
+{% extends 'base.html' %}
+{% block title %}Categories — POS{% endblock %}
+{% block page_title %}Categories{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn btn-primary" onclick="openAddModal()">
+    <i class="bi bi-plus-lg"></i> Add Category
+  </button>
+{% endblock %}
+
+{% block content %}
+
+<!-- Dynamic messages container (same style as Django messages) -->
+<div id="messages-container" style="margin-bottom:16px;"></div>
+
+<!-- Search -->
+<form method="get" id="search-form" style="margin-bottom:16px;">
+  <div style="position:relative; max-width:320px;">
+    <i class="bi bi-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--color-text-tertiary); font-size:13px;"></i>
+    <input type="text" name="q" placeholder="Search categories..."
+           value="{{ search }}"
+           oninput="clearTimeout(_st); _st=setTimeout(()=>this.form.submit(), 400)"
+           style="width:100%; padding:8px 12px 8px 32px; border:0.5px solid var(--color-border-secondary);
+                  border-radius:8px; background:var(--color-background-primary);
+                  color:var(--color-text-primary); font-size:13px; box-sizing:border-box;">
+  </div>
+</form>
+
+<!-- Table -->
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Category</th><th>Products</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="cat-tbody">
+        {% for cat in categories %}
+        <tr id="row-{{ cat.pk }}">
+          <td class="strong" id="name-{{ cat.pk }}">{{ cat.name }}</td>
+          <td>
+            <span class="badge badge-{% if cat.product_count > 0 %}green{% else %}amber{% endif %}"
+                  id="badge-{{ cat.pk }}">
+              {{ cat.product_count }} product{{ cat.product_count|pluralize }}
+            </span>
+          </td>
+          <td>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-warning btn-sm"
+                      onclick="openEditModal({{ cat.pk }}, '{{ cat.name|escapejs }}')">
+                <i class="bi bi-pencil"></i> Edit
+              </button>
+              <button class="btn btn-danger btn-sm"
+                      onclick="openDeleteModal({{ cat.pk }}, '{{ cat.name|escapejs }}')">
+                <i class="bi bi-trash"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr id="empty-row">
+          <td colspan="3" style="text-align:center; padding:32px; color:#475569;">
+            No categories yet. Add one!
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page_obj.paginator.num_pages > 1 %}
+  <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px;
+              border-top:0.5px solid var(--color-border-tertiary); flex-wrap:wrap; gap:10px;">
+    <div style="font-size:12px; color:var(--color-text-secondary);">
+      Showing <strong style="color:var(--color-text-primary);">{{ page_obj.start_index }}–{{ page_obj.end_index }}</strong>
+      of <strong style="color:var(--color-text-primary);">{{ page_obj.paginator.count }}</strong> categories
+    </div>
+    <div style="display:flex; gap:4px;">
+      {% if page_obj.has_previous %}
+        <a href="?page={{ page_obj.previous_page_number }}{% if search %}&q={{ search }}{% endif %}"
+           style="padding:6px 10px; border:0.5px solid var(--color-border-secondary); border-radius:7px;
+                  background:var(--color-background-primary); color:var(--color-text-primary);
+                  font-size:13px; text-decoration:none;">
+          <i class="bi bi-chevron-left" style="font-size:11px;"></i> Prev
+        </a>
+      {% endif %}
+      {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}{% if search %}&q={{ search }}{% endif %}"
+           style="padding:6px 10px; border:0.5px solid var(--color-border-secondary); border-radius:7px;
+                  background:var(--color-background-primary); color:var(--color-text-primary);
+                  font-size:13px; text-decoration:none;">
+          Next <i class="bi bi-chevron-right" style="font-size:11px;"></i>
+        </a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+
+<!-- ── Modal Backdrop ─────────────────────────────────────────────────────── -->
+<div id="modal-backdrop" onclick="closeModal()"
+     style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55);
+            z-index:1000; backdrop-filter:blur(2px);"></div>
+
+
+<!-- ── Add / Edit Modal ───────────────────────────────────────────────────── -->
+<div id="cat-modal"
+     style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+            z-index:1001; background:var(--color-background-primary);
+            border:0.5px solid var(--color-border-primary); border-radius:14px;
+            padding:28px; width:100%; max-width:400px; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+    <div id="modal-title" style="font-size:15px; font-weight:600; color:var(--color-text-primary);"></div>
+    <button onclick="closeModal()"
+            style="background:none; border:none; color:var(--color-text-tertiary);
+                   font-size:18px; cursor:pointer; line-height:1;">
+      <i class="bi bi-x-lg"></i>
+    </button>
+  </div>
+
+  <div id="modal-error"
+       style="display:none; padding:10px 14px; margin-bottom:14px; border-radius:8px;
+              background:rgba(239,68,68,0.12); color:#f87171;
+              border:0.5px solid rgba(239,68,68,0.3); font-size:13px;
+              display:none; align-items:center; gap:8px;">
+    <i class="bi bi-x-circle"></i>
+    <span id="modal-error-text"></span>
+  </div>
+
+  <div class="form-group" style="margin-bottom:20px;">
+    <label class="form-label">Category Name</label>
+    <input id="modal-name" class="form-control" type="text"
+           placeholder="e.g. Beverages"
+           onkeydown="if(event.key==='Enter') submitModal()">
+  </div>
+
+  <div style="display:flex; gap:10px;">
+    <button id="modal-save-btn" onclick="submitModal()" class="btn btn-primary" style="flex:1;">
+      <i class="bi bi-check-lg"></i> Save
+    </button>
+    <button onclick="closeModal()" class="btn btn-ghost">Cancel</button>
+  </div>
+</div>
+
+
+<!-- ── Delete Confirm Modal ───────────────────────────────────────────────── -->
+<div id="delete-modal"
+     style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+            z-index:1001; background:var(--color-background-primary);
+            border:0.5px solid var(--color-border-primary); border-radius:14px;
+            padding:28px; width:100%; max-width:380px; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+    <div style="font-size:15px; font-weight:600; color:#f87171;">
+      <i class="bi bi-exclamation-triangle" style="margin-right:6px;"></i>Delete Category
+    </div>
+    <button onclick="closeModal()"
+            style="background:none; border:none; color:var(--color-text-tertiary);
+                   font-size:18px; cursor:pointer; line-height:1;">
+      <i class="bi bi-x-lg"></i>
+    </button>
+  </div>
+  <div id="delete-msg"
+       style="font-size:13px; color:var(--color-text-primary); font-weight:500; margin-bottom:8px;"></div>
+  <div style="font-size:12px; color:var(--color-text-tertiary); margin-bottom:22px;">
+    Products in this category won't be deleted — they'll just be unlinked.
+  </div>
+  <div style="display:flex; gap:10px;">
+    <button id="delete-confirm-btn" onclick="submitDelete()" class="btn btn-danger" style="flex:1;">
+      <i class="bi bi-trash"></i> Yes, Delete
+    </button>
+    <button onclick="closeModal()" class="btn btn-ghost">Cancel</button>
+  </div>
+</div>
+
+
+<script>
+  const CSRF   = '{{ csrf_token }}';
+  let _editId   = null;
+  let _deleteId = null;
+
+  // ── Alert message (matches Django messages style in base.html) ─────────────
+  function showAlert(msg, type) {
+    // type: 'success' | 'error' | 'warning' | 'info'
+    const icons = {
+      success: 'check-circle',
+      error:   'x-circle',
+      warning: 'exclamation-triangle',
+      info:    'info-circle',
+    };
+    const icon = icons[type] || 'check-circle';
+    const container = document.getElementById('messages-container');
+
+    const el = document.createElement('div');
+    el.className = `alert alert-${type}`;
+    el.innerHTML = `
+      <i class="bi bi-${icon}"></i>
+      ${escHtml(msg)}
+      <button class="alert-close" onclick="this.parentElement.remove()">
+        <i class="bi bi-x"></i>
+      </button>`;
+    container.appendChild(el);
+
+    // Auto-dismiss after 4s (same as base.html Django messages)
+    setTimeout(() => {
+      el.style.transition  = 'opacity 0.4s, margin 0.4s';
+      el.style.opacity     = '0';
+      el.style.marginBottom = '0';
+      setTimeout(() => el.remove(), 400);
+    }, 4000);
+  }
+
+  // ── Open modals ────────────────────────────────────────────────────────────
+  function openAddModal() {
+    _editId = null;
+    document.getElementById('modal-title').textContent = 'Add Category';
+    document.getElementById('modal-name').value = '';
+    hideModalError();
+    showModal('cat-modal');
+    setTimeout(() => document.getElementById('modal-name').focus(), 80);
+  }
+
+  function openEditModal(id, name) {
+    _editId = id;
+    document.getElementById('modal-title').textContent = 'Edit Category';
+    document.getElementById('modal-name').value = name;
+    hideModalError();
+    showModal('cat-modal');
+    setTimeout(() => {
+      const inp = document.getElementById('modal-name');
+      inp.focus(); inp.select();
+    }, 80);
+  }
+
+  function openDeleteModal(id, name) {
+    _deleteId = id;
+    document.getElementById('delete-msg').textContent = `Are you sure you want to delete "${name}"?`;
+    showModal('delete-modal');
+  }
+
+  function showModal(id) {
+    document.getElementById('modal-backdrop').style.display = 'block';
+    document.getElementById(id).style.display = 'block';
+  }
+
+  function closeModal() {
+    document.getElementById('modal-backdrop').style.display  = 'none';
+    document.getElementById('cat-modal').style.display       = 'none';
+    document.getElementById('delete-modal').style.display    = 'none';
+  }
+
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  // ── Submit Add / Edit ──────────────────────────────────────────────────────
+  async function submitModal() {
+    const name   = document.getElementById('modal-name').value.trim();
+    const btn    = document.getElementById('modal-save-btn');
+    const isEdit = !!_editId;
+
+    hideModalError();
+    if (!name) { showModalError('Category name is required.'); return; }
+
+    btn.disabled  = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving…';
+
+    const url  = isEdit
+      ? `/products/categories/edit/${_editId}/`
+      : `/products/categories/add/`;
+    const body = new FormData();
+    body.append('name', name);
+    body.append('csrfmiddlewaretoken', CSRF);
+
+    try {
+      const res  = await fetch(url, { method: 'POST', body });
+      const data = await res.json();
+
+      if (!data.ok) {
+        showModalError(data.error);
+      } else {
+        closeModal();
+        if (isEdit) {
+          document.getElementById(`name-${data.id}`).textContent = data.name;
+          const row = document.getElementById(`row-${data.id}`);
+          row.querySelectorAll('button')[0].setAttribute('onclick', `openEditModal(${data.id}, '${escJs(data.name)}')`);
+          row.querySelectorAll('button')[1].setAttribute('onclick', `openDeleteModal(${data.id}, '${escJs(data.name)}')`);
+          showAlert(`Category "${data.name}" updated successfully.`, 'success');
+        } else {
+          removeEmptyRow();
+          appendRow(data.id, data.name);
+          showAlert(`Category "${data.name}" added successfully.`, 'success');
+        }
+      }
+    } catch {
+      showModalError('Something went wrong. Please try again.');
+    }
+
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="bi bi-check-lg"></i> Save';
+  }
+
+  // ── Submit Delete ──────────────────────────────────────────────────────────
+  async function submitDelete() {
+    const btn  = document.getElementById('delete-confirm-btn');
+    btn.disabled  = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Deleting…';
+
+    const body = new FormData();
+    body.append('csrfmiddlewaretoken', CSRF);
+
+    try {
+      const res  = await fetch(`/products/categories/delete/${_deleteId}/`, { method: 'POST', body });
+      const data = await res.json();
+      if (data.ok) {
+        closeModal();
+        const row = document.getElementById(`row-${_deleteId}`);
+        if (row) row.remove();
+        if (!document.querySelector('#cat-tbody tr')) {
+          document.getElementById('cat-tbody').innerHTML =
+            `<tr id="empty-row"><td colspan="3"
+               style="text-align:center; padding:32px; color:#475569;">
+               No categories yet. Add one!</td></tr>`;
+        }
+        showAlert(`Category "${data.name}" deleted.`, 'error');
+      }
+    } catch {
+      showAlert('Something went wrong. Please try again.', 'error');
+    }
+
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="bi bi-trash"></i> Yes, Delete';
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function showModalError(msg) {
+    const el = document.getElementById('modal-error');
+    document.getElementById('modal-error-text').textContent = msg;
+    el.style.display = 'flex';
+  }
+
+  function hideModalError() {
+    document.getElementById('modal-error').style.display = 'none';
+  }
+
+  function removeEmptyRow() {
+    const r = document.getElementById('empty-row');
+    if (r) r.remove();
+  }
+
+  function appendRow(id, name) {
+    const tbody = document.getElementById('cat-tbody');
+    const tr    = document.createElement('tr');
+    tr.id       = `row-${id}`;
+    tr.innerHTML = `
+      <td class="strong" id="name-${id}">${escHtml(name)}</td>
+      <td><span class="badge badge-amber" id="badge-${id}">0 products</span></td>
+      <td>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-warning btn-sm"
+                  onclick="openEditModal(${id}, '${escJs(name)}')">
+            <i class="bi bi-pencil"></i> Edit
+          </button>
+          <button class="btn btn-danger btn-sm"
+                  onclick="openDeleteModal(${id}, '${escJs(name)}')">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function escJs(s) {
+    return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  }
+</script>
+
+{% endblock %}

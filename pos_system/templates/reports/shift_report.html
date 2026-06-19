@@ -1,0 +1,784 @@
+{% extends 'base.html' %}
+{% block title %}Cash Closing Report — POS{% endblock %}
+{% block page_title %}Cash Closing Report{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+
+  <!-- Header -->
+    <div class="d-flex justify-content-between align-items-start mb-4 no-print">
+      <div>
+        <h2 class="mb-0 fw-bold">
+          <i class="bi bi-cash-stack text-success me-2"></i>
+          Cash Closing Report
+        </h2>
+        <p class="text-muted mb-0 mt-1">{{ date_label }} · {{ transaction_count }} transactions</p>
+      </div>
+    </div><br>
+
+    <!-- Filters -->
+<div class="card border-0 shadow-sm mb-4 no-print" style="border-radius: 12px;">
+    <div class="card-body p-4">
+      <form method="get" class="filter-grid">
+        <div class="filter-item">
+          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Date</label>
+          <input type="date" name="day" class="form-control form-control-dark"
+                 value="{{ selected_date }}" max="{{ today|date:'Y-m-d' }}">
+        </div>
+        <div class="filter-item">
+          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Cashier</label>
+          {% if is_admin %}
+          <select name="cashier" class="form-select form-select-dark h-100">
+            <option value="">All Cashiers</option>
+            {% for c in cashiers %}
+            <option value="{{ c.pk }}" {% if selected_cashier == c.pk|stringformat:"s" %}selected{% endif %}>
+              {{ c.username }}
+            </option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <!-- Cashier sees themselves only, dropdown disabled -->
+          <select name="cashier" class="form-select form-select-dark h-100" disabled>
+            <option value="{{ request.user.pk }}" selected>{{ request.user.username }}</option>
+          </select>
+          <!-- Hidden input to still submit the value -->
+          <input type="hidden" name="cashier" value="{{ request.user.pk }}">
+          {% endif %}
+        </div>
+        <div class="filter-item">
+          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Starting Cash</label>
+          <div class="input-group">
+            <span class="input-group-text bg-light"></span>
+            <input type="number" name="starting_cash" class="form-control"
+                   value="{{ starting_cash }}" step="0.01" min="0">
+          </div>
+        </div>
+        <div class="filter-item">
+          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Less Collection</label>
+          <div class="input-group">
+            <span class="input-group-text bg-light"></span>
+            <input type="number" name="less_collection" class="form-control"
+                   value="{{ less_collection }}" step="0.01" min="0">
+          </div>
+        </div>
+        <div class="filter-item filter-actions">
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary flex-fill">
+              <i class="bi bi-calculator me-1"></i> Calculate
+            </button>
+            <button type="button" onclick="printShiftReport()" class="btn btn-dark flex-fill">
+              <i class="bi bi-printer me-1"></i> Print Report
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div><br>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- METRICS GRID - CSS GRID (avoids Bootstrap row/col conflicts)     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="metrics-grid mb-4">
+
+    <!-- Starting Cash -->
+    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
+      <div class="metric-icon">
+        <i class="bi bi-wallet2"></i>
+      </div>
+      <div class="metric-label">Starting Cash</div>
+      <div class="metric-value">₱{{ starting_cash|floatformat:2 }}</div>
+    </div>
+
+    <!-- Total Sales -->
+    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
+      <div class="metric-icon">
+        <i class="bi bi-graph-up-arrow"></i>
+      </div>
+      <div class="metric-label">Total Sales</div>
+      <div class="metric-value">₱{{ total_sales|floatformat:2 }}</div>
+      <div class="metric-sub">{{ transaction_count }} txns</div>
+    </div>
+
+    <!-- Total Gross -->
+    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
+      <div class="metric-icon">
+        <i class="bi bi-cash-coin"></i>
+      </div>
+      <div class="metric-label">Total Gross</div>
+      <div class="metric-value">₱{{ total_gross|floatformat:2 }}</div>
+    </div>
+
+    <!-- Less Collection -->
+    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
+      <div class="metric-icon">
+        <i class="bi bi-arrow-down-circle"></i>
+      </div>
+      <div class="metric-label">Less Collection</div>
+      <div class="metric-value">₱{{ less_collection|floatformat:2 }}</div>
+    </div>
+
+  </div><br>
+
+  <!-- NET AMOUNT BANNER -->
+  <div class="net-banner mb-4" style="background: {% if net_amount >= starting_cash %}linear-gradient(135deg, #0ba360 0%, #3cba92 100%){% else %}linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%){% endif %};">
+    <div class="net-content">
+      <div>
+        <div class="net-label">Net Amount (Cash in Drawer)</div>
+        <div class="net-value">₱{{ net_amount|floatformat:2 }}</div>
+      </div>
+      <div class="net-badge">
+        {% if net_amount > starting_cash %}↑ Surplus{% elif net_amount == starting_cash %}→ Break-even{% else %}↓ Shortage{% endif %}
+      </div>
+    </div>
+  </div><br>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- DETAILS GRID - CSS GRID                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="details-grid mb-4">
+
+    <!-- Sales Breakdown -->
+    <div class="detail-card">
+      <div class="detail-header">
+        <i class="bi bi-pie-chart text-primary"></i>
+        <h5>Sales Breakdown</h5>
+      </div>
+      <div class="detail-body">
+        <div class="detail-row plain">
+          <span class="text-secondary">Cash Sales</span>
+          <span class="fw-bold text-dark fs-5">₱{{ cash_sales|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row plain">
+          <span class="fw-bold text-dark">Net Sales</span>
+          <span class="fw-bold text-success fs-5">₱{{ total_sales|floatformat:2 }}</span>
+        </div>
+        <hr class="my-3">
+        <div class="detail-row plain">
+          <span class="text-secondary">Avg. Transaction</span>
+          <span class="fw-bold text-dark">₱{{ avg_transaction|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row plain">
+          <span class="text-secondary">Transaction Count</span>
+          <span class="fw-bold text-dark">{{ transaction_count }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drawer Reconciliation -->
+    <div class="detail-card">
+      <div class="detail-header">
+        <i class="bi bi-calculator text-info"></i>
+        <h5>Drawer Reconciliation</h5>
+      </div>
+      <div class="detail-body">
+        <div class="detail-row plain">
+          <span class="text-secondary">Starting Cash</span>
+          <span class="fw-semibold">₱{{ starting_cash|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row plain">
+          <span class="text-secondary">+ Net Sales</span>
+          <span class="fw-semibold text-success">+₱{{ total_sales|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row plain">
+          <span class="fw-bold text-primary">Total Gross</span>
+          <span class="fw-bold text-primary fs-5">₱{{ total_gross|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row plain">
+          <span class="text-secondary">− Collection / Drop</span>
+          <span class="fw-semibold text-danger">−₱{{ less_collection|floatformat:2 }}</span>
+        </div>
+        <hr class="border-2 border-success">
+        <div class="detail-row plain">
+          <span class="fw-bold text-dark">Expected in Drawer</span>
+          <span class="fw-bold text-success fs-4">₱{{ net_amount|floatformat:2 }}</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Transactions Table
+  <div class="card border-0 shadow-sm no-print" style="border-radius: 14px;">
+    <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-4 px-4">
+      <h5 class="fw-bold text-dark mb-0">
+        <i class="bi bi-receipt text-warning me-2"></i>Transactions — {{ date_label }}
+      </h5>
+      <span class="badge bg-success rounded-pill px-3 py-2">{{ transaction_count }} sales</span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+          <thead class="bg-light">
+            <tr>
+              <th class="ps-4 py-3 text-secondary small fw-semibold">#</th>
+              <th class="py-3 text-secondary small fw-semibold">Time</th>
+              <th class="py-3 text-secondary small fw-semibold">Customer</th>
+              <th class="py-3 text-secondary small fw-semibold">Cashier</th>
+              <th class="py-3 text-secondary small fw-semibold text-end">Items</th>
+              <th class="pe-4 py-3 text-secondary small fw-semibold text-end">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sale in sales %}
+            <tr>
+              <td class="ps-4 py-3">
+                <span class="badge bg-light text-dark border">#{{ sale.pk }}</span>
+              </td>
+              <td class="py-3 text-secondary">{{ sale.created_at|time:"H:i" }}</td>
+              <td class="py-3 fw-medium">{{ sale.customer|default:"Walk-in" }}</td>
+              <td class="py-3">
+                <span class="d-flex align-items-center gap-2">
+                  <div class="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center" style="width: 28px; height: 28px; font-size: 11px; font-weight: bold;">
+                    {{ sale.cashier.username|first|upper }}
+                  </div>
+                  {{ sale.cashier }}
+                </span>
+              </td>
+              <td class="py-3 text-end">
+                <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ sale.items.count }}</span>
+              </td>
+              <td class="pe-4 py-3 text-end fw-bold">₱{{ sale.total|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6" class="text-center py-5 text-muted">
+                <i class="bi bi-inbox fs-1 d-block mb-2 opacity-25"></i>
+                No completed sales on {{ date_label }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot class="bg-light">
+            <tr>
+              <td colspan="5" class="ps-4 py-3 text-end fw-bold text-dark">Total Sales</td>
+              <td class="pe-4 py-3 text-end fw-bold text-success fs-5">₱{{ total_sales|floatformat:2 }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>-->
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- POS PRINT VIEW                                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="pos-print-view" style="display:none;">
+    <div class="pos-receipt">
+
+      <div class="pos-header">
+        <h2>SHIFT REPORT</h2>
+        <p>{{ date_label }}</p>
+        <p>{% if selected_cashier %}Cashier: {{ selected_cashier }}{% else %}All Cashiers{% endif %}</p>
+        <p>Generated: {% now "H:i" %}</p>
+        <div class="pos-divider">═══════════════════════</div>
+      </div>
+
+      <div class="pos-section">
+        <div class="pos-line">
+          <span>Starting Cash</span>
+          <span>₱{{ starting_cash|floatformat:2 }}</span>
+        </div>
+        <div class="pos-line">
+          <span>+ Total Sales</span>
+          <span>₱{{ total_sales|floatformat:2 }}</span>
+        </div>
+        <div class="pos-line pos-bold">
+          <span>= Total Gross</span>
+          <span>₱{{ total_gross|floatformat:2 }}</span>
+        </div>
+        <div class="pos-line pos-deduction">
+          <span>− Less Collection</span>
+          <span>₱{{ less_collection|floatformat:2 }}</span>
+        </div>
+        <div class="pos-divider">───────────────────────</div>
+        <div class="pos-line pos-total">
+          <span>NET AMOUNT</span>
+          <span>₱{{ net_amount|floatformat:2 }}</span>
+        </div>
+      </div>
+
+      <div class="pos-divider">═══════════════════════</div>
+      <div class="pos-section">
+        <p class="pos-center pos-bold">SALES BREAKDOWN</p>
+        <div class="pos-line">
+          <span>Transactions</span>
+          <span>{{ transaction_count }}</span>
+        </div>
+        <div class="pos-line">
+          <span>Avg. Transaction</span>
+          <span>₱{{ avg_transaction|floatformat:2 }}</span>
+        </div>
+        <div class="pos-line">
+          <span>Cash Sales</span>
+          <span>₱{{ cash_sales|floatformat:2 }}</span>
+        </div>
+      </div>
+
+      <div class="pos-divider">═══════════════════════</div>
+      <div class="pos-footer">
+        <p>*** END OF REPORT ***</p>
+        <p>Thank you!</p>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<style>
+/* ═══════════════════════════════════════════════════════════════ */
+/* CSS GRID LAYOUT (avoids Bootstrap row/col conflicts)             */
+/* ═══════════════════════════════════════════════════════════════ */
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.metric-card {
+  border-radius: 14px;
+  padding: 20px;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.metric-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  font-size: 20px;
+}
+
+.metric-label {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 4px;
+}
+
+.metric-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.metric-sub {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 4px;
+}
+
+/* Net Amount Banner */
+.net-banner {
+  border-radius: 14px;
+  padding: 24px;
+  color: white;
+}
+
+.net-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.net-label {
+  font-size: 12px;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.net-value {
+  font-size: 36px;
+  font-weight: 700;
+}
+
+.net-badge {
+  background: rgba(255,255,255,0.25);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Details Grid */
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.detail-card {
+  background: var(--card, #1a2234);
+  border: 1px solid var(--border, rgba(255,255,255,0.07));
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.detail-header {
+  padding: 20px 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.detail-header i {
+  font-size: 18px;
+}
+
+.detail-header h5 {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text, #f1f5f9);
+}
+
+.detail-body {
+  padding: 0 24px 20px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+.detail-row.bg-light {
+  background: rgba(255,255,255,0.05);
+}
+
+.detail-row.highlight {
+  background: #e6fffa;
+  color: #0f766e;
+}
+
+.detail-row.bg-blue {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.detail-row.plain {
+  padding: 8px 16px;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+  .net-content {
+    flex-direction: column;
+    text-align: center;
+    gap: 12px;
+  }
+  .net-value {
+    font-size: 28px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* POS THERMAL PRINTER STYLES                                       */
+/* ═══════════════════════════════════════════════════════════════ */
+@media print {
+  @page { margin: 10mm; }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0 !important; padding: 0 !important;
+    width: 100% !important;
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print, .sidebar, .navbar, header, footer,
+  .container-fluid > *:not(.pos-print-view) {
+    display: none !important; visibility: hidden !important;
+  }
+
+  .pos-print-view {
+    display: block !important; visibility: visible !important;
+    width: 100% !important; margin: 0 !important; padding: 0 !important;
+    background: white !important;
+    text-align: center !important;
+  }
+
+  .pos-receipt {
+    width: 76mm !important; margin: 0 auto !important; padding: 3mm 2mm !important;
+    font-family: 'Courier New', 'Consolas', monospace; font-size: 11px;
+    line-height: 1.35; color: #000; text-align: center;
+    display: inline-block !important;
+  }
+
+  .pos-header { margin-bottom: 5px; }
+  .pos-header h2 { font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
+  .pos-header p { margin: 1px 0; font-size: 10px; text-align: center; }
+  .pos-divider { font-size: 10px; margin: 4px 0; color: #333; text-align: center; letter-spacing: -1px; }
+  .pos-section { margin-bottom: 5px; text-align: left; }
+  .pos-line { display: flex; justify-content: space-between; align-items: baseline; margin: 2px 0; width: 100%; }
+  .pos-line span:first-child { flex: 1 1 auto; text-align: left; padding-right: 4px; }
+  .pos-line span:last-child { flex: 0 0 auto; text-align: right; white-space: nowrap; }
+  .pos-bold { font-weight: bold; }
+  .pos-deduction { color: #c00; }
+  .pos-total { font-size: 12px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 4px 0; display: flex; justify-content: space-between; }
+  .pos-center { text-align: center !important; display: block; width: 100%; }
+  .pos-footer { margin-top: 8px; font-size: 10px; }
+  .pos-footer p { margin: 1px 0; text-align: center; }
+}
+
+.pos-print-view { display: none; }
+
+
+/* Filter Grid Layout */
+.filter-grid {
+  display: grid;
+  grid-template-columns: 3fr 3fr 2fr 2fr 2fr;
+  gap: 16px;
+  align-items: end;
+}
+
+.filter-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-item label {
+  margin-bottom: 8px;
+}
+
+.filter-button {
+  padding-bottom: 0;
+}
+
+.filter-button button {
+  height: 38px; /* Match Bootstrap input height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .filter-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .filter-button {
+    grid-column: span 3;
+  }
+}
+
+@media (max-width: 768px) {
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .filter-button {
+    grid-column: span 1;
+  }
+}
+
+/* Dark-themed form controls for dropdowns */
+.form-control-dark,
+.form-select-dark {
+  background-color: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  appearance: none;
+}
+
+.form-control-dark:focus,
+.form-select-dark:focus {
+  background-color: #1e293b;
+  border-color: #3b82f6;
+  color: #e2e8f0;
+  box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.25);
+}
+
+/* Fix date input calendar icon color */
+.form-control-dark[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+/* Fix select dropdown arrow */
+.form-select-dark {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23e2e8f0' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 12px;
+}
+
+/* Ensure options are readable */
+.form-select-dark option {
+  background-color: #1e293b;
+  color: #e2e8f0;
+}
+
+/* Hover states */
+.form-control-dark:hover,
+.form-select-dark:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Match select height to inputs */
+.form-select-dark {
+  height: 38px;           /* Same as Bootstrap default input height */
+  min-height: 38px;
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+  padding-left: 0.75rem;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+/* Or use this if you want it to stretch with flex */
+.filter-item .form-select {
+  height: auto;
+  min-height: 38px;
+  flex: 1;
+}
+
+/* Ensure all filter inputs same height */
+.filter-item .form-control,
+.filter-item .form-select,
+.filter-item .input-group {
+  height: 38px;
+  min-height: 38px;
+}
+
+.filter-item .input-group .form-control {
+  height: 100%;
+}
+
+/* Dark-themed form controls */
+.form-control-dark,
+.form-select-dark {
+  background-color: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+}
+
+.form-control-dark:focus,
+.form-select-dark:focus {
+  background-color: #1e293b;
+  border-color: #3b82f6;
+  color: #e2e8f0;
+  box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.25);
+}
+
+/* Fix date input calendar icon */
+.form-control-dark[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+/* Fix select dropdown arrow */
+.form-select-dark {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23e2e8f0' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 16px 12px;
+}
+
+.form-select-dark option {
+  background-color: #1e293b;
+  color: #e2e8f0;
+}
+
+/* Button match */
+.filter-button button {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+</style>
+
+<script>
+function printShiftReport() {
+  const receipt = document.querySelector('.pos-receipt');
+  if (!receipt) return;
+
+  const printWindow = window.open('', '_blank', `width=${screen.availWidth},height=${screen.availHeight},left=0,top=0`);
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Shift Report</title>
+      <style>
+        @page { margin: 5mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+          width: 100%;
+          background: white;
+          display: flex;
+          justify-content: center;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .pos-receipt {
+          width: 76mm;
+          padding: 3mm 2mm;
+          font-family: 'Courier New', 'Consolas', monospace;
+          font-size: 11px;
+          line-height: 1.35;
+          color: #000;
+          text-align: center;
+        }
+        .pos-header { margin-bottom: 5px; }
+        .pos-header h2 { font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
+        .pos-header p { margin: 1px 0; font-size: 10px; text-align: center; }
+        .pos-divider { font-size: 10px; margin: 4px 0; color: #333; text-align: center; letter-spacing: -1px; }
+        .pos-section { margin-bottom: 5px; text-align: left; }
+        .pos-line { display: flex; justify-content: space-between; align-items: baseline; margin: 2px 0; width: 100%; }
+        .pos-line span:first-child { flex: 1 1 auto; text-align: left; padding-right: 4px; }
+        .pos-line span:last-child { flex: 0 0 auto; text-align: right; white-space: nowrap; }
+        .pos-bold { font-weight: bold; }
+        .pos-deduction { color: #c00; }
+        .pos-total { font-size: 12px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 4px 0; display: flex; justify-content: space-between; }
+        .pos-center { text-align: center !important; display: block; width: 100%; }
+        .pos-footer { margin-top: 8px; font-size: 10px; }
+        .pos-footer p { margin: 1px 0; text-align: center; }
+      </style>
+    </head>
+    <body>
+      ${receipt.outerHTML}
+    </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.moveTo(0, 0);
+  printWindow.resizeTo(screen.availWidth, screen.availHeight);
+  printWindow.focus();
+  setTimeout(() => {
+    printWindow.print();
+    printWindow.close();
+  }, 250);
+}
+</script>
+
+{% endblock %}
