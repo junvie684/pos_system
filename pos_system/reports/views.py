@@ -14,119 +14,123 @@ from django.core.paginator import Paginator
 from accounts.decorators import manager_or_admin_required
 from sales.models import Sale, SaleItem
 
+from .ledger import refunds_given, refunds_given_by, sales_made, total_of
+
+def _period_ledger(start, end):
+    """Sales made, refunds given and the net, for a date range (see reports/ledger.py)."""
+    made = sales_made(start, end).select_related('customer', 'cashier').order_by('created_at')
+    refunds = refunds_given(start, end).select_related('customer', 'cashier', 'refunded_by').order_by('refund_time')
+    gross = total_of(made)
+    refunded = total_of(refunds)
+    return {
+        'made': made,
+        'refunds': refunds,
+        'gross_sales': gross,
+        'refunds_total': refunded,
+        'total': gross - refunded,
+        'transaction_count': made.count(),
+        'refund_count': refunds.count(),
+    }
+
+
+def _ledger_csv(filename, ledger, when_format):
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    writer = csv.writer(response)
+    writer.writerow(['#', 'Customer', 'Cashier', 'Status', 'Total', 'When'])
+    for sale in ledger['made']:
+        writer.writerow([
+            sale.pk,
+            str(sale.customer) if sale.customer else 'Walk-in',
+            str(sale.cashier),
+            sale.get_status_display(),
+            sale.total,
+            timezone.localtime(sale.created_at).strftime(when_format),
+        ])
+    writer.writerow([])
+    writer.writerow(['REFUNDS GIVEN', '', 'Refunded by', 'Original sale', 'Amount', 'When'])
+    for sale in ledger['refunds']:
+        writer.writerow([
+            sale.pk,
+            str(sale.customer) if sale.customer else 'Walk-in',
+            str(sale.refunded_by or sale.cashier),
+            timezone.localtime(sale.created_at).strftime('%b %d, %Y'),
+            -sale.total,
+            timezone.localtime(sale.refund_time).strftime(when_format),
+        ])
+    writer.writerow([])
+    writer.writerow(['', '', '', 'GROSS SALES', ledger['gross_sales'], ''])
+    writer.writerow(['', '', '', 'LESS REFUNDS', -ledger['refunds_total'], ''])
+    writer.writerow(['', '', '', 'NET', ledger['total'], ''])
+    return response
+
+
+def _ledger_context(ledger, request):
+    page_obj = Paginator(ledger['made'], 11).get_page(request.GET.get('page', 1))
+    return {
+        'sales':             page_obj,
+        'page_obj':          page_obj,
+        'refunds':           ledger['refunds'],
+        'gross_sales':       ledger['gross_sales'],
+        'refunds_total':     ledger['refunds_total'],
+        'total':             ledger['total'],
+        'transaction_count': ledger['transaction_count'],
+        'refund_count':      ledger['refund_count'],
+    }
+
+
 @manager_or_admin_required
 def daily_report(request):
     # --- Date Filter ---
-    day_param = request.GET.get('day')
-    if day_param:
-        try:
-            selected = datetime.strptime(day_param, '%Y-%m-%d').date()
-        except ValueError:
-            selected = timezone.localdate()
-    else:
+    try:
+        selected = datetime.strptime(request.GET.get('day', ''), '%Y-%m-%d').date()
+    except ValueError:
         selected = timezone.localdate()
 
-    sales = Sale.objects.filter(
-        created_at__date=selected,
-        status='completed'
-    ).order_by('created_at')
-
-    total         = sum(s.total for s in sales)
+    ledger        = _period_ledger(selected, selected)
     selected_date = selected.strftime('%Y-%m-%d')
-    date_label    = selected.strftime('%B %d, %Y')
 
-    # --- CSV Export ---
     if request.GET.get('export') == 'csv':
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="daily_report_{selected_date}.csv"'
-        writer = csv.writer(response)
-        writer.writerow(['#', 'Customer', 'Cashier', 'Total', 'Time'])
-        for sale in sales:
-            writer.writerow([
-                sale.pk,
-                str(sale.customer) if sale.customer else 'Walk-in',
-                str(sale.cashier),
-                sale.total,
-                sale.created_at.strftime('%H:%M'),
-            ])
-        writer.writerow([])
-        writer.writerow(['', '', 'TOTAL', total, ''])
-        return response
-
-    # --- Pagination ---
-    paginator = Paginator(sales, 11)
-    page_number = request.GET.get('page', 1)
-    page_obj = paginator.get_page(page_number)
+        return _ledger_csv(f'daily_report_{selected_date}.csv', ledger, '%H:%M')
 
     return render(request, 'reports/daily.html', {
-        'sales':         page_obj,
-        'total':         total,
-        'date':          date_label,
+        **_ledger_context(ledger, request),
+        'date':          selected.strftime('%B %d, %Y'),
         'selected_date': selected_date,
-        'page_obj':      page_obj,
     })
 
 
 @manager_or_admin_required
 def monthly_report(request):
-    now = timezone.now()
+    now = timezone.localtime()
 
     # --- Filters ---
     try:
         selected_month = int(request.GET.get('month', now.month))
         selected_year  = int(request.GET.get('year',  now.year))
+        date(selected_year, selected_month, 1)
     except ValueError:
         selected_month = now.month
         selected_year  = now.year
 
-    sales = Sale.objects.filter(
-        created_at__year=selected_year,
-        created_at__month=selected_month,
-        status='completed'
-    ).order_by('created_at')
+    first = date(selected_year, selected_month, 1)
+    last  = date(selected_year, selected_month, calendar.monthrange(selected_year, selected_month)[1])
+    ledger = _period_ledger(first, last)
 
-    total       = sum(s.total for s in sales)
-    month_label = datetime(selected_year, selected_month, 1).strftime('%B %Y')
+    if request.GET.get('export') == 'csv':
+        return _ledger_csv(f'monthly_report_{selected_year}_{selected_month:02d}.csv', ledger, '%b %d, %Y')
 
-    # Month/year dropdown data
     months = [
         {'value': i, 'label': datetime(2000, i, 1).strftime('%B')}
         for i in range(1, 13)
     ]
-    years = list(range(now.year - 3, now.year + 1))
-
-    # --- CSV Export ---
-    if request.GET.get('export') == 'csv':
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="monthly_report_{selected_year}_{selected_month:02d}.csv"'
-        writer = csv.writer(response)
-        writer.writerow(['#', 'Customer', 'Cashier', 'Total', 'Date'])
-        for sale in sales:
-            writer.writerow([
-                sale.pk,
-                str(sale.customer) if sale.customer else 'Walk-in',
-                str(sale.cashier),
-                sale.total,
-                sale.created_at.strftime('%b %d, %Y'),
-            ])
-        writer.writerow([])
-        writer.writerow(['', '', 'TOTAL', total, ''])
-        return response
-
-    # --- Pagination ---
-    paginator = Paginator(sales, 11)
-    page_number = request.GET.get('page', 1)
-    page_obj = paginator.get_page(page_number)
-
     return render(request, 'reports/monthly.html', {
-        'sales':          page_obj,
-        'total':          total,
-        'month_label':    month_label,
+        **_ledger_context(ledger, request),
+        'month_label':    first.strftime('%B %Y'),
         'selected_month': selected_month,
         'selected_year':  selected_year,
         'months':         months,
-        'years':          years,
-        'page_obj':       page_obj,
+        'years':          list(range(now.year - 3, now.year + 1)),
     })
 
 
@@ -428,18 +432,18 @@ def shift_report(request):
     except (ValueError, TypeError, InvalidOperation):
         less_collection = Decimal('0.00')
 
-    # --- Query: Completed sales ---
-    sales_qs = Sale.objects.filter(
-        status='completed',
-        created_at__date=selected_date,
-    )
+    # --- Query: sales rung up this day (incl. ones refunded later) ---
+    # See reports/ledger.py: sales count on the day made, refunds on the day given.
+    sales_qs = sales_made(selected_date, selected_date)
+    refunds_qs = refunds_given(selected_date, selected_date)
 
-    # Apply cashier filter
+    # Apply cashier filter: their sales, and refunds they handed out
     if cashier_id:
         try:
-            sales_qs = sales_qs.filter(cashier_id=int(cashier_id))
             if not selected_cashier:
                 selected_cashier = User.objects.get(pk=int(cashier_id))
+            sales_qs = sales_qs.filter(cashier=selected_cashier)
+            refunds_qs = refunds_given_by(refunds_qs, selected_cashier)
         except (ValueError, User.DoesNotExist):
             pass
 
@@ -463,35 +467,23 @@ def shift_report(request):
         for method, amount in sorted(by_method.items(), key=lambda kv: -kv[1])
     ]
 
-    total_gross = starting_cash + cash_sales          # cash that should be in the drawer
-    net_amount = total_gross - less_collection
+    # --- Refunds handed out this day ---
+    total_refunds = total_of(refunds_qs)
+    cash_refunds = total_of(refunds_qs.filter(payment_method='cash'))  # only these leave the drawer
+    refund_count = refunds_qs.count()
+
+    total_gross = starting_cash + cash_sales          # cash taken in, plus the float
+    net_amount = total_gross - cash_refunds - less_collection
     transaction_count = sales_qs.count()
     avg_transaction = (total_sales / Decimal(str(transaction_count))) if transaction_count else Decimal('0.00')
-
-    # --- Refunds ---
-    refunds_qs = Sale.objects.filter(
-        status='refunded',
-        created_at__date=selected_date,
-    )
-    if cashier_id and selected_cashier:
-        refunds_qs = refunds_qs.filter(cashier=selected_cashier)
-
-    total_refunds = Decimal('0.00')
-    for r in refunds_qs:
-        refund_total = r.total if isinstance(r.total, Decimal) else Decimal(str(r.total))
-        total_refunds += refund_total
-
-    refund_count = refunds_qs.count()
 
     # --- Cashier list ---
     # Cashiers only see themselves in dropdown; admins/managers see all
     if is_admin:
-        tenant_cashier_ids = (
-            Sale.objects
-            .filter(status='completed')  # TenantManager scopes this
-            .values_list('cashier_id', flat=True)
-            .distinct()
-        )
+        # Anyone who rang up a sale or handed out a refund (TenantManager scopes these)
+        tenant_cashier_ids = set(
+            Sale.objects.filter(status__in=('completed', 'refunded')).values_list('cashier_id', flat=True)
+        ) | set(Sale.objects.exclude(refunded_by=None).values_list('refunded_by_id', flat=True))
         cashiers = User.objects.filter(pk__in=tenant_cashier_ids)
     else:
         cashiers = User.objects.filter(pk=request.user.pk)  # Only themselves
@@ -513,6 +505,7 @@ def shift_report(request):
         'transaction_count': transaction_count,
         'avg_transaction': float(avg_transaction),
         'total_refunds': float(total_refunds),
+        'cash_refunds': float(cash_refunds),
         'refund_count': refund_count,
         'cash_sales': float(cash_sales),
         'non_cash_sales': float(non_cash_sales),

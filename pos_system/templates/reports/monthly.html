@@ -52,15 +52,25 @@
 </div>
 
 <!-- Stat Cards -->
-<div class="stat-grid" style="max-width:500px; margin-bottom:24px;">
+<div class="stat-grid" style="margin-bottom:24px;">
   <div class="stat-card green">
-    <div class="stat-label">Monthly Revenue</div>
+    <div class="stat-label">Net Revenue</div>
     <div class="stat-value">₱{{ total|floatformat:2 }}</div>
     <i class="bi bi-cash-stack stat-icon"></i>
   </div>
+  <div class="stat-card blue">
+    <div class="stat-label">Gross Sales</div>
+    <div class="stat-value">₱{{ gross_sales|floatformat:2 }}</div>
+    <i class="bi bi-graph-up-arrow stat-icon"></i>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-label">Refunds Given</div>
+    <div class="stat-value">−₱{{ refunds_total|floatformat:2 }}</div>
+    <i class="bi bi-arrow-counterclockwise stat-icon"></i>
+  </div>
   <div class="stat-card amber">
     <div class="stat-label">Transactions</div>
-    <div class="stat-value">{{ sales|length }}</div>
+    <div class="stat-value">{{ transaction_count }}</div>
     <i class="bi bi-receipt stat-icon"></i>
   </div>
 </div>
@@ -77,7 +87,7 @@
           <td class="strong">#{{ sale.pk }}</td>
           <td>{{ sale.customer|default:"Walk-in" }}</td>
           <td>{{ sale.cashier }}</td>
-          <td class="strong">₱{{ sale.total }}</td>
+          <td class="strong">₱{{ sale.total }}{% if sale.status == 'refunded' %} <span class="badge badge-red">Refunded</span>{% endif %}</td>
           <td>{{ sale.created_at|date:"M d, Y" }}</td>
         </tr>
         {% empty %}
@@ -127,5 +137,28 @@
   </div>
   {% endif %}
 </div>
+
+<!-- Refunds given in this period (money returned on these dates) -->
+{% if refunds %}
+<div class="card" style="margin-top:16px;">
+  <div style="font-size:13px; color:#475569; margin-bottom:16px;">Refunds given · {{ refund_count }}</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Sale</th><th>Originally sold</th><th>Refunded by</th><th>Amount</th><th>Refunded</th></tr></thead>
+      <tbody>
+        {% for sale in refunds %}
+        <tr>
+          <td class="strong">#{{ sale.pk }}</td>
+          <td>{{ sale.created_at|date:"M d, Y" }}</td>
+          <td>{{ sale.refunded_by|default:sale.cashier }}</td>
+          <td class="strong">−₱{{ sale.total }}</td>
+          <td>{{ sale.refund_time|date:"M d, H:i" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 
 {% endblock %}

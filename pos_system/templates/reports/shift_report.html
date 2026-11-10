@@ -191,6 +191,10 @@
           <span class="fw-bold text-primary fs-5">₱{{ total_gross|floatformat:2 }}</span>
         </div>
         <div class="detail-row plain">
+          <span class="text-secondary">− Cash Refunds{% if refund_count %} ({{ refund_count }}){% endif %}</span>
+          <span class="fw-semibold text-danger">−₱{{ cash_refunds|floatformat:2 }}</span>
+        </div>
+        <div class="detail-row plain">
           <span class="text-secondary">− Collection / Drop</span>
           <span class="fw-semibold text-danger">−₱{{ less_collection|floatformat:2 }}</span>
         </div>
@@ -292,6 +296,10 @@
         <div class="pos-line pos-bold">
           <span>= Gross Cash</span>
           <span>₱{{ total_gross|floatformat:2 }}</span>
+        </div>
+        <div class="pos-line pos-deduction">
+          <span>− Cash Refunds</span>
+          <span>₱{{ cash_refunds|floatformat:2 }}</span>
         </div>
         <div class="pos-line pos-deduction">
           <span>− Less Collection</span>
