@@ -15,7 +15,7 @@
       <label for="scan-input" class="sr-only">Scan a barcode or search products</label>
       <input type="text" id="scan-input" autocomplete="off" spellcheck="false"
              placeholder="Scan a barcode or search products"
-             oninput="filterProducts()" onkeydown="onScanKey(event)">
+             oninput="filterProducts(); scheduleRemoteSearch()" onkeydown="onScanKey(event)">
       <button type="button" class="scan-clear" id="scan-clear" onclick="resetScan()" aria-label="Clear search" hidden>
         <i class="bi bi-x-lg"></i>
       </button>
@@ -396,6 +396,8 @@
 </style>
 
 {% if preserved_cart %}{{ preserved_cart|json_script:"preserved-cart" }}{% endif %}
+{% if pending_sale %}{{ pending_cart|json_script:"pending-cart" }}{{ pending_removed|json_script:"pending-removed" }}{% endif %}
+{{ product_api_url|json_script:"product-api-url" }}
 <script>
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const peso = n => '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -415,6 +417,77 @@ function buildBarcodeMap() {
   return map;
 }
 const barcodeMap = buildBarcodeMap();
+
+// ── Server lookup ───────────────────────────────────────────────────────────
+// The grid only renders the best sellers. Scans and searches that miss it ask
+// the server, which knows every active product in this store.
+const PRODUCT_API = JSON.parse(document.getElementById('product-api-url').textContent);
+const gridEl = document.getElementById('product-grid');
+
+async function fetchProducts(params) {
+  try {
+    const r = await fetch(PRODUCT_API + '?' + new URLSearchParams(params),
+                          { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    if (!r.ok) return null;
+    return (await r.json()).products;
+  } catch (e) {
+    return null;  // offline or signed out: the caller falls back to what's on screen
+  }
+}
+
+// Same markup as the server-rendered cards; every value goes through esc().
+function makeCard(p) {
+  const stock = parseInt(p.stock, 10);
+  const card = document.createElement('button');
+  card.type = 'button';
+  card.className = 'product-card remote' + (stock <= 0 ? ' out' : stock <= 5 ? ' low' : '');
+  Object.assign(card.dataset, {
+    id: String(p.id), name: p.name, price: p.price, stock: String(stock),
+    category: p.category || '', barcode: p.barcode || ''
+  });
+  card.addEventListener('click', () => addToCart(card));
+  if (stock <= 0) { card.disabled = true; card.setAttribute('aria-disabled', 'true'); }
+  card.innerHTML =
+      (p.image ? '<span class="pc-img"><img src="' + esc(p.image) + '" alt="" loading="lazy"></span>' : '')
+    + '<span class="pc-name">' + esc(p.name) + '</span>'
+    + '<span class="pc-meta">'
+    +   (p.barcode ? '<span class="pc-code">' + esc(p.barcode) + '</span>' : '')
+    +   '<span class="pc-stock">' + (stock <= 0 ? 'Out of stock' : stock <= 5 ? stock + ' left' : stock + ' in stock') + '</span>'
+    + '</span>'
+    + '<span class="pc-price">₱' + esc(p.price) + '</span>';
+  return card;
+}
+
+// The on-screen card for a product if there is one, else a new one. Either way
+// its barcode is remembered so the next scan of it is instant.
+function cardFor(p) {
+  const card = gridEl.querySelector('.product-card[data-id="' + esc(String(p.id)) + '"]') || makeCard(p);
+  if (card.dataset.barcode) barcodeMap[card.dataset.barcode.trim()] = card;
+  return card;
+}
+
+let searchSeq = 0, searchTimer = null;
+function scheduleRemoteSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => searchRemote(scanInput.value.trim()), 250);
+}
+
+async function searchRemote(q) {
+  const seq = ++searchSeq;
+  if (q.length < 2) {
+    gridEl.querySelectorAll('.product-card.remote').forEach(c => c.remove());
+    filterProducts();
+    return;
+  }
+  const found = await fetchProducts({ q });
+  if (seq !== searchSeq || !found) return;  // a newer search started, or offline
+  gridEl.querySelectorAll('.product-card.remote').forEach(c => c.remove());
+  found.forEach(p => {
+    const card = cardFor(p);
+    if (!card.isConnected) gridEl.appendChild(card);
+  });
+  filterProducts();
+}
 
 let burst = { keys: '', last: 0, target: null, before: null };
 const resetBurst = () => { burst = { keys: '', last: 0, target: null, before: null }; };
@@ -449,13 +522,20 @@ function refocusScan() {
   if (window.matchMedia('(pointer: fine)').matches) scanInput.focus({ preventScroll: true });
 }
 
-function onScanKey(e) {
+async function onScanKey(e) {
   if (e.key === 'Escape') { resetScan(); return; }
   if (e.key !== 'Enter') return;
   e.preventDefault();
   const code = scanInput.value.trim();
   if (!code) return;
   if (barcodeMap[code]) { handleBarcode(code); resetScan(); return; }
+
+  // Not on screen: try an exact barcode on the server, then a name search.
+  const exact = await fetchProducts({ barcode: code });
+  if (exact && exact.length) { cardFor(exact[0]); handleBarcode(code); resetScan(); return; }
+  clearTimeout(searchTimer);
+  await searchRemote(code);
+
   const visible = [...document.querySelectorAll('.product-card')].filter(c => c.style.display !== 'none' && !c.disabled);
   if (visible.length === 1) {
     addToCart(visible[0]);
@@ -471,13 +551,23 @@ function onScanKey(e) {
 
 function resetScan() {
   scanInput.value = '';
-  filterProducts();
+  clearTimeout(searchTimer);
+  searchRemote('');
   scanInput.focus();
 }
 
-function handleBarcode(code) {
+async function handleBarcode(code) {
   if (!code) return;
-  const card = barcodeMap[code];
+  let card = barcodeMap[code];
+  if (!card) {
+    const found = await fetchProducts({ barcode: code });
+    if (found === null) {
+      showToast('Could not reach the server to look up ' + code, 'err');
+      setScannerMsg('Lookup failed for ' + code + '. Check the connection.', 'err');
+      return;
+    }
+    if (found.length) card = cardFor(found[0]);
+  }
   if (!card) { showToast('Barcode not found: ' + code, 'err'); setScannerMsg('Barcode not found: ' + code, 'err'); return; }
   if (parseInt(card.dataset.stock) === 0) { showToast('Out of stock: ' + card.dataset.name, 'warn'); setScannerMsg('Out of stock: ' + card.dataset.name, 'warn'); return; }
   addToCart(card);
@@ -806,17 +896,27 @@ renderCart();
 // ── Load pending sale if resuming ───────────────────────────────────────────
 {% if pending_sale %}
 (function() {
-  {% for item in pending_sale.items.all %}
-  cart[{{ item.product.pk }}] = {
-    id: '{{ item.product.pk }}',
-    name: '{{ item.product.name|escapejs }}',
-    price: parseFloat('{{ item.unit_price }}'),
-    qty: {{ item.quantity }},
-    stock: {{ item.product.stock }}
-  };
-  {% endfor %}
+  // Current prices (the server charges these), not the prices when held.
+  const held = JSON.parse(document.getElementById('pending-cart').textContent);
+  const removed = JSON.parse(document.getElementById('pending-removed').textContent);
+  let repriced = 0;
+  held.forEach(item => {
+    cart[item.product_id] = {
+      id: item.product_id, name: item.name, price: item.unit_price,
+      qty: item.quantity, stock: item.stock,
+      hasError: item.quantity > item.stock
+    };
+    cartOrder.push(item.product_id);
+    if (item.price_changed) repriced++;
+  });
   renderCart();
-  showToast('Loaded held sale No. {{ pending_sale.pk }}', 'info');
+  if (removed.length) {
+    showToast('Removed (no longer sold): ' + removed.join(', '), 'warn');
+  } else if (repriced) {
+    showToast(repriced + ' price(s) changed since this sale was held. Total updated.', 'warn');
+  } else {
+    showToast('Loaded held sale No. {{ pending_sale.pk }}', 'info');
+  }
 
   {% if pending_sale.payment_method %}
   document.getElementById('payment-method-select').value = "{{ pending_sale.payment_method|escapejs }}";

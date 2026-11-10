@@ -1,7 +1,6 @@
 from django.db.models import Max
 from django.db.models import Q, Count
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from .models import Product, Category
 from .forms import ProductForm
@@ -185,18 +184,6 @@ def delete_category(request, pk):
         category.delete()
         return JsonResponse({'ok': True, 'name': name})
     return JsonResponse({'ok': False, 'error': 'Invalid request.'})
-
-
-# ─── API: product search (used in create_sale) ───────────────
-@login_required
-def product_search_api(request):
-    q = request.GET.get('q', '')
-    products = Product.objects.filter(is_active=True).filter(  # ← ONLY ACTIVE PRODUCTS
-        Q(name__icontains=q) | Q(category__name__icontains=q)
-    ).select_related('category')[:20]
-    data = [{'id': p.pk, 'name': p.name, 'price': str(p.price),
-              'stock': p.stock, 'category': p.category.name if p.category else ''} for p in products]
-    return JsonResponse({'products': data})
 
 
 # ─── Product Sale History ───────────────

@@ -25,6 +25,7 @@ from decimal import Decimal, InvalidOperation
 import logging
 
 from django.urls import reverse
+from django.views.decorators.http import require_GET
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +286,7 @@ def _pos_screen_context():
         'categories': Category.objects.all(),
         # Fresh per screen load; the page reloads after every finished sale.
         'idempotency_key': str(uuid.uuid4()),
+        'product_api_url': reverse('sales:product_lookup'),
     }
 
 
@@ -301,12 +303,16 @@ def _pop_preserved(session):
 
 
 def _parse_lines(post):
-    """[(product_id, qty)] from the cart's items-N-* fields. Client prices are ignored."""
+    """
+    [(product_id, qty)] from the cart's items-N-* fields. Client prices are ignored.
+    Repeated products are merged into one line so stock is checked against the
+    real total quantity (in first-seen order).
+    """
     try:
         total_forms = min(int(post.get('items-TOTAL_FORMS', 0)), 1000)
     except ValueError:
         return []
-    lines = []
+    merged = {}
     for i in range(total_forms):
         try:
             product_id = int(post.get(f'items-{i}-product', ''))
@@ -314,8 +320,8 @@ def _parse_lines(post):
         except ValueError:
             continue
         if qty > 0:
-            lines.append((product_id, qty))
-    return lines
+            merged[product_id] = merged.get(product_id, 0) + qty
+    return list(merged.items())
 
 
 def _settle_payment(sale, status, method, tendered_raw, reference, total):
@@ -518,6 +524,46 @@ def _checkout(request, pending_sale=None):
     return _sale_done_response(request, sale, f'Sale #{sale.pk} completed successfully.')
 
 
+# ─── Product lookup for the POS screen ───────────────────────
+PRODUCT_SEARCH_LIMIT = 20
+
+
+def _product_payload(product):
+    return {
+        'id': product.pk,
+        'name': product.name,
+        'price': str(product.price),
+        'stock': product.stock,
+        'barcode': product.barcode or '',
+        'category': product.category.name if product.category else '',
+        'image': product.image.url if product.image else '',
+    }
+
+
+@pos_login_required
+@require_GET
+def product_lookup(request):
+    """
+    The POS grid only renders the best sellers, so scans and searches that
+    miss it ask here. `?barcode=` is an exact match; `?q=` searches name,
+    barcode and category. Active products of the current store only.
+    """
+    barcode = request.GET.get('barcode', '').strip()
+    query = request.GET.get('q', '').strip()
+    products = Product.objects.filter(is_active=True).select_related('category')
+
+    if barcode:
+        products = products.filter(barcode=barcode)[:1]
+    elif query:
+        products = products.filter(
+            Q(name__icontains=query) | Q(barcode__icontains=query) | Q(category__name__icontains=query)
+        ).order_by('name')[:PRODUCT_SEARCH_LIMIT]
+    else:
+        products = []
+
+    return JsonResponse({'products': [_product_payload(p) for p in products]})
+
+
 # ─── Create Sale (POS) ───────────────────────────────────────
 @pos_login_required
 def create_sale(request):
@@ -565,9 +611,28 @@ def resume_sale(request, pk):
     if request.method == 'POST':
         return _checkout(request, pending_sale=sale)
 
+    # Show what will actually be charged: checkout re-prices from the product,
+    # so the cart must use today's price, not the price when the sale was held.
+    pending_cart, pending_removed = [], []
+    for item in sale.items.select_related('product'):
+        product = item.product
+        if not product.is_active:
+            pending_removed.append(product.name)
+            continue
+        pending_cart.append({
+            'product_id': str(product.pk),
+            'name': product.name,
+            'unit_price': float(product.price),  # display only
+            'quantity': item.quantity,
+            'stock': product.stock,
+            'price_changed': product.price != item.unit_price,
+        })
+
     return render(request, 'sales/create_sale.html', {
         **_pos_screen_context(),
         'pending_sale': sale,
+        'pending_cart': pending_cart,
+        'pending_removed': pending_removed,
         **_pop_preserved(request.session),
         **_cashier_today(request.user),
     })

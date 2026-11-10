@@ -175,6 +175,101 @@ class PreservedCartEscapingTests(SaleTestBase):
         self.assertIn('preserved-cart', resp.content.decode())
 
 
+# ─── Fix 1: POS can find any product, not just the 24 shown ─────
+class ProductLookupApiTests(SaleTestBase):
+    URL = '/api/products/'
+
+    def setUp(self):
+        super().setUp()
+        # 30 extra products: more than the 24 the POS grid shows
+        for i in range(30):
+            make_product(self.tenant, name=f'Item {i:02d}', price='10.00', stock=5)
+        self.rare = make_product(self.tenant, name='Rare Widget', price='99.00', stock=3)
+        Product.all_objects.filter(pk=self.rare.pk).update(barcode='4800000000017')
+
+    def test_requires_pos_login(self):
+        resp = self.client.get(self.URL, {'q': 'Rare'})
+        self.assertNotEqual(resp.status_code, 200)
+
+    def test_exact_barcode_finds_product_outside_the_grid(self):
+        pos_login(self.client, self.cashier)
+        data = self.client.get(self.URL, {'barcode': '4800000000017'}).json()
+        self.assertEqual([p['id'] for p in data['products']], [self.rare.pk])
+        self.assertEqual(data['products'][0]['price'], '99.00')
+
+    def test_barcode_must_match_exactly(self):
+        pos_login(self.client, self.cashier)
+        data = self.client.get(self.URL, {'barcode': '48000'}).json()
+        self.assertEqual(data['products'], [])
+
+    def test_search_by_name_is_capped(self):
+        pos_login(self.client, self.cashier)
+        data = self.client.get(self.URL, {'q': 'item'}).json()
+        self.assertEqual(len(data['products']), 20)
+        data = self.client.get(self.URL, {'q': 'rare wid'}).json()
+        self.assertEqual([p['id'] for p in data['products']], [self.rare.pk])
+
+    def test_inactive_and_other_store_products_are_hidden(self):
+        Product.all_objects.filter(pk=self.rare.pk).update(is_active=False)
+        other = make_tenant('store-b')
+        foreign = make_product(other, name='Rare Foreign')
+        Product.all_objects.filter(pk=foreign.pk).update(barcode='4800000000024')
+        pos_login(self.client, self.cashier)
+        self.assertEqual(self.client.get(self.URL, {'q': 'rare'}).json()['products'], [])
+        self.assertEqual(self.client.get(self.URL, {'barcode': '4800000000024'}).json()['products'], [])
+
+    def test_empty_query_returns_nothing(self):
+        pos_login(self.client, self.cashier)
+        self.assertEqual(self.client.get(self.URL).json()['products'], [])
+
+    def test_pos_screen_points_at_the_lookup_api(self):
+        pos_login(self.client, self.cashier)
+        self.assertContains(self.client.get('/new/'), self.URL)
+
+
+# ─── Fix 3: resumed cart shows what will actually be charged ────
+class ResumeShowsCurrentPriceTests(SaleTestBase):
+    def test_resumed_cart_uses_current_price_and_flags_change(self):
+        pending = make_sale(self.tenant, self.cashier, self.product, qty=2, status='pending')
+        Product.all_objects.filter(pk=self.product.pk).update(price=Decimal('65.00'))
+        pos_login(self.client, self.cashier)
+        cart = self.client.get(f'/pending/{pending.pk}/resume/').context['pending_cart']
+        self.assertEqual(cart, [{
+            'product_id': str(self.product.pk), 'name': 'Soap', 'unit_price': 65.0,
+            'quantity': 2, 'stock': 10, 'price_changed': True,
+        }])
+
+    def test_inactive_product_is_left_out_of_resumed_cart(self):
+        pending = make_sale(self.tenant, self.cashier, self.product, qty=1, status='pending')
+        Product.all_objects.filter(pk=self.product.pk).update(is_active=False)
+        pos_login(self.client, self.cashier)
+        ctx = self.client.get(f'/pending/{pending.pk}/resume/').context
+        self.assertEqual(ctx['pending_cart'], [])
+        self.assertEqual(ctx['pending_removed'], ['Soap'])
+
+
+# ─── Fix 8: duplicate lines are checked as one quantity ─────────
+class DuplicateLineTests(SaleTestBase):
+    def setUp(self):
+        super().setUp()
+        Product.all_objects.filter(pk=self.product.pk).update(stock=5)
+        pos_login(self.client, self.cashier)
+
+    def test_split_lines_over_stock_get_the_stock_message(self):
+        resp = self.client.post('/new/', sale_post(
+            [(self.product, 3, '50.00'), (self.product, 3, '50.00')], cash_tendered='300.00'), follow=True)
+        self.assertFalse(Sale.all_objects.exists())
+        self.assertEqual(self.stock(), 5)
+        self.assertContains(resp, 'requested 6, only 5 in stock')
+
+    def test_split_lines_within_stock_become_one_line(self):
+        self.client.post('/new/', sale_post(
+            [(self.product, 2, '50.00'), (self.product, 2, '50.00')], cash_tendered='200.00'))
+        item = SaleItem.all_objects.get()
+        self.assertEqual(item.quantity, 4)
+        self.assertEqual(self.stock(), 1)
+
+
 # ─── C-6: refunds only for completed sales, recorded ────────────
 class RefundTests(SaleTestBase):
     def test_refunding_pending_sale_is_rejected_and_stock_unchanged(self):

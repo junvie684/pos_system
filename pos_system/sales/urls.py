@@ -11,4 +11,5 @@ urlpatterns = [
     path('pending/<int:pk>/delete/', views.delete_pending, name='delete_pending'),
     path('refund/<int:pk>/',    views.refund_sale,     name='refund_sale'),
     path('receipt/<int:sale_id>/', views.receipt, name='receipt'),
+    path('api/products/',       views.product_lookup,  name='product_lookup'),
 ]
