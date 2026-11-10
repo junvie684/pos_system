@@ -104,8 +104,9 @@
       <div class="metric-icon">
         <i class="bi bi-cash-coin"></i>
       </div>
-      <div class="metric-label">Total Gross</div>
+      <div class="metric-label">Gross Cash</div>
       <div class="metric-value">₱{{ total_gross|floatformat:2 }}</div>
+      <div class="metric-sub">starting + cash sales</div>
     </div>
 
     <!-- Less Collection -->
@@ -148,6 +149,12 @@
           <span class="text-secondary">Cash Sales</span>
           <span class="fw-bold text-dark fs-5">₱{{ cash_sales|floatformat:2 }}</span>
         </div>
+        {% for row in non_cash_breakdown %}
+        <div class="detail-row plain">
+          <span class="text-secondary">{{ row.label }}</span>
+          <span class="fw-semibold text-dark">₱{{ row.amount|floatformat:2 }}</span>
+        </div>
+        {% endfor %}
         <div class="detail-row plain">
           <span class="fw-bold text-dark">Net Sales</span>
           <span class="fw-bold text-success fs-5">₱{{ total_sales|floatformat:2 }}</span>
@@ -176,11 +183,11 @@
           <span class="fw-semibold">₱{{ starting_cash|floatformat:2 }}</span>
         </div>
         <div class="detail-row plain">
-          <span class="text-secondary">+ Net Sales</span>
-          <span class="fw-semibold text-success">+₱{{ total_sales|floatformat:2 }}</span>
+          <span class="text-secondary">+ Cash Sales</span>
+          <span class="fw-semibold text-success">+₱{{ cash_sales|floatformat:2 }}</span>
         </div>
         <div class="detail-row plain">
-          <span class="fw-bold text-primary">Total Gross</span>
+          <span class="fw-bold text-primary">Gross Cash</span>
           <span class="fw-bold text-primary fs-5">₱{{ total_gross|floatformat:2 }}</span>
         </div>
         <div class="detail-row plain">
@@ -279,11 +286,11 @@
           <span>₱{{ starting_cash|floatformat:2 }}</span>
         </div>
         <div class="pos-line">
-          <span>+ Total Sales</span>
-          <span>₱{{ total_sales|floatformat:2 }}</span>
+          <span>+ Cash Sales</span>
+          <span>₱{{ cash_sales|floatformat:2 }}</span>
         </div>
         <div class="pos-line pos-bold">
-          <span>= Total Gross</span>
+          <span>= Gross Cash</span>
           <span>₱{{ total_gross|floatformat:2 }}</span>
         </div>
         <div class="pos-line pos-deduction">
@@ -311,6 +318,16 @@
         <div class="pos-line">
           <span>Cash Sales</span>
           <span>₱{{ cash_sales|floatformat:2 }}</span>
+        </div>
+        {% for row in non_cash_breakdown %}
+        <div class="pos-line">
+          <span>{{ row.label }}</span>
+          <span>₱{{ row.amount|floatformat:2 }}</span>
+        </div>
+        {% endfor %}
+        <div class="pos-line pos-bold">
+          <span>Total Sales</span>
+          <span>₱{{ total_sales|floatformat:2 }}</span>
         </div>
       </div>
 

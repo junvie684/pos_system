@@ -106,6 +106,75 @@ class CheckoutValidationTests(SaleTestBase):
         self.assertEqual(self.stock(), 10)
 
 
+# ─── P1-1: the same checkout submitted twice records one sale ───
+class DuplicateCheckoutTests(SaleTestBase):
+    KEY = '6f1c7a52-0d4e-4c55-9a43-1f0a5d6f3b21'
+
+    def setUp(self):
+        super().setUp()
+        pos_login(self.client, self.cashier)
+
+    def post(self, key, ajax=True):
+        data = sale_post([(self.product, 2, '50.00')], cash_tendered='100.00')
+        if key is not None:
+            data['idempotency_key'] = key
+        headers = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'} if ajax else {}
+        return self.client.post('/new/', data, **headers)
+
+    def test_pos_screen_renders_a_fresh_key(self):
+        first = self.client.get('/new/').context['idempotency_key']
+        second = self.client.get('/new/').context['idempotency_key']
+        self.assertTrue(first)
+        self.assertNotEqual(first, second)
+
+    def test_resubmitting_same_key_creates_one_sale_and_deducts_once(self):
+        r1 = self.post(self.KEY)
+        r2 = self.post(self.KEY)
+        self.assertEqual(Sale.all_objects.count(), 1)
+        self.assertEqual(self.stock(), 8)
+        self.assertEqual(r1.json(), r2.json())
+        self.assertEqual(r2.json()['sale_id'], Sale.all_objects.get().pk)
+
+    def test_non_ajax_retry_with_same_key_goes_to_existing_receipt(self):
+        self.post(self.KEY)
+        resp = self.post(self.KEY, ajax=False)
+        sale = Sale.all_objects.get()
+        self.assertRedirects(resp, f'/receipt/{sale.pk}/', fetch_redirect_response=False)
+
+    def test_different_keys_create_separate_sales(self):
+        self.post(self.KEY)
+        self.post('0b8c4c4e-31a5-4c8e-8d0e-6b2a3f7d9e10')
+        self.assertEqual(Sale.all_objects.count(), 2)
+        self.assertEqual(self.stock(), 6)
+
+    def test_retried_resume_completion_returns_the_same_sale(self):
+        pending = make_sale(self.tenant, self.cashier, self.product, qty=1, status='pending')
+        data = sale_post([(self.product, 2, '50.00')], cash_tendered='100.00')
+        data['idempotency_key'] = self.KEY
+        ajax = {'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}
+        self.client.post(f'/pending/{pending.pk}/resume/', data, **ajax)
+        retry = self.client.post(f'/pending/{pending.pk}/resume/', data, **ajax)
+        self.assertEqual(retry.json(), {'success': True, 'sale_id': pending.pk})
+        self.assertEqual(self.stock(), 8)
+
+    def test_missing_or_malformed_key_still_checks_out(self):
+        self.post(None)
+        self.post('not-a-uuid')
+        self.assertEqual(Sale.all_objects.count(), 2)
+
+
+# ─── P1-6: product names can't break out of the script block ────
+class PreservedCartEscapingTests(SaleTestBase):
+    def test_product_name_with_script_tag_is_not_rendered_raw(self):
+        evil = make_product(self.tenant, name='</script><script>alert(1)</script>', stock=0)
+        pos_login(self.client, self.cashier)
+        # Out of stock -> cart is preserved in the session and re-rendered.
+        self.client.post('/new/', sale_post([(evil, 1, '50.00')]))
+        resp = self.client.get('/new/')
+        self.assertNotIn(b'</script><script>alert(1)', resp.content)
+        self.assertIn('preserved-cart', resp.content.decode())
+
+
 # ─── C-6: refunds only for completed sales, recorded ────────────
 class RefundTests(SaleTestBase):
     def test_refunding_pending_sale_is_rejected_and_stock_unchanged(self):

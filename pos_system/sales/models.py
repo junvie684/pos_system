@@ -27,6 +27,9 @@ class Sale(TenantModel):
     refunded_by      = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                          related_name='refunds_processed')
     refunded_at      = models.DateTimeField(null=True, blank=True)
+    # One per POS screen load; a resubmitted checkout (double-click, retry
+    # after a dropped connection) carries the same key and maps to this sale.
+    idempotency_key  = models.UUIDField(null=True, blank=True, unique=True, editable=False)
 
     @property
     def total(self):

@@ -6,12 +6,13 @@ from django.shortcuts import render, redirect, get_object_or_404
 from customers.models import Customer
 from products.models import Product, Category
 from .models import Sale, SaleItem
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, DecimalField
 
 from django.db.models import Value, IntegerField, Q as DQ
 
 import json
+import uuid
 from django.utils import timezone
 from django.db.models import Sum, Count
 from django.db.models.functions import TruncDate, Coalesce
@@ -282,6 +283,8 @@ def _pos_screen_context():
         'products': products,
         'customers': Customer.objects.all(),
         'categories': Category.objects.all(),
+        # Fresh per screen load; the page reloads after every finished sale.
+        'idempotency_key': str(uuid.uuid4()),
     }
 
 
@@ -290,7 +293,9 @@ def _pop_preserved(session):
     data = {k: session.pop(f'preserved_{k}', None) for k in PRESERVED_KEYS}
     cart = data.pop('cart')
     return {
-        'preserved_cart': json.dumps(cart) if cart else None,
+        # Raw list; the template emits it with |json_script (never |safe),
+        # so a product name can't close the <script> block.
+        'preserved_cart': cart or None,
         **{f'preserved_{k}': v for k, v in data.items()},
     }
 
@@ -342,12 +347,57 @@ def _settle_payment(sale, status, method, tendered_raw, reference, total):
         sale.reference_number = reference or None
 
 
+def _is_ajax(request):
+    return request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+
+
+def _parse_idempotency_key(post):
+    try:
+        return uuid.UUID(post.get('idempotency_key', ''))
+    except ValueError:
+        return None
+
+
+def _sale_done_response(request, sale, message=None):
+    """Where the POS goes after a sale is recorded (or found already recorded)."""
+    if sale.status == 'pending':
+        if _is_ajax(request):
+            return JsonResponse({'success': True, 'redirect': reverse('sales:pending_sales')})
+        if message:
+            messages.success(request, message)
+        return redirect('sales:pending_sales')
+
+    if _is_ajax(request):
+        return JsonResponse({'success': True, 'sale_id': sale.pk})
+    if message:
+        messages.success(request, message)
+    return redirect('sales:receipt', sale_id=sale.pk)
+
+
+def _replayed_checkout(request):
+    """
+    If this checkout's key already produced a sale (double-click, or a retry
+    after the first response was lost), answer as the first request did
+    instead of recording the sale again. Returns None for a new checkout.
+    """
+    key = _parse_idempotency_key(request.POST)
+    if key is None:
+        return None
+    sale = Sale.objects.filter(idempotency_key=key).first()
+    return _sale_done_response(request, sale) if sale else None
+
+
 def _checkout(request, pending_sale=None):
     """
     Validate and record a sale (new, or completing/re-holding a pending one).
     Prices, totals and change are always computed on the server.
     """
-    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    replay = _replayed_checkout(request)
+    if replay:
+        return replay
+
+    is_ajax = _is_ajax(request)
+    idempotency_key = _parse_idempotency_key(request.POST)
     retry_url = (reverse('sales:resume_sale', args=[pending_sale.pk]) if pending_sale
                  else reverse('sales:create_sale'))
 
@@ -428,6 +478,8 @@ def _checkout(request, pending_sale=None):
             sale.customer = customer
             sale.status = status
             sale.payment_method = payment_method
+            if idempotency_key:
+                sale.idempotency_key = idempotency_key  # unique: a concurrent duplicate fails here
             sale.save()
 
             total = Decimal('0.00')
@@ -449,21 +501,21 @@ def _checkout(request, pending_sale=None):
     except Sale.DoesNotExist:
         messages.error(request, f'Sale #{pending_sale.pk} is no longer pending.')
         return redirect('sales:pending_sales')
+    except IntegrityError:
+        # A simultaneous duplicate of this checkout won the race: reply with its sale.
+        replay = _replayed_checkout(request)
+        if replay:
+            return replay
+        logger.exception('Checkout failed (pending_sale=%s)', getattr(pending_sale, 'pk', None))
+        return fail('Sale could not be completed. Please try again.', cart)
     except Exception:
         logger.exception('Checkout failed (pending_sale=%s)', getattr(pending_sale, 'pk', None))
         return fail('Sale could not be completed. Please try again.', cart)
 
     if status == 'pending':
-        if is_ajax:
-            return JsonResponse({'success': True, 'redirect': reverse('sales:pending_sales')})
         verb = 'updated and kept on hold' if pending_sale else 'saved as pending'
-        messages.success(request, f'Sale #{sale.pk} {verb}.')
-        return redirect('sales:pending_sales')
-
-    if is_ajax:
-        return JsonResponse({'success': True, 'sale_id': sale.pk})
-    messages.success(request, f'Sale #{sale.pk} completed successfully.')
-    return redirect('sales:receipt', sale_id=sale.pk)
+        return _sale_done_response(request, sale, f'Sale #{sale.pk} {verb}.')
+    return _sale_done_response(request, sale, f'Sale #{sale.pk} completed successfully.')
 
 
 # ─── Create Sale (POS) ───────────────────────────────────────
@@ -494,6 +546,12 @@ def pending_sales(request):
 @pos_login_required
 def resume_sale(request, pk):
     sale = get_object_or_404(Sale, pk=pk)
+
+    # A retried completion arrives after the sale is no longer pending.
+    if request.method == 'POST':
+        replay = _replayed_checkout(request)
+        if replay:
+            return replay
 
     if sale.status != 'pending':
         messages.error(request, f'Sale #{pk} is no longer pending.')

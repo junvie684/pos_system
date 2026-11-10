@@ -152,6 +152,7 @@
       <input type="hidden" name="change_given" id="form-change-given">
       <input type="hidden" name="payment_method" id="form-payment-method" value="cash">
       <input type="hidden" name="reference_number" id="form-reference-number">
+      <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
       <div id="form-items"></div>
       <button type="button" class="btn btn-ghost act-hold" onclick="saveAsPending()">
         <i class="bi bi-pause-circle" aria-hidden="true"></i> Hold
@@ -394,6 +395,7 @@
 }
 </style>
 
+{% if preserved_cart %}{{ preserved_cart|json_script:"preserved-cart" }}{% endif %}
 <script>
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const peso = n => '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -829,7 +831,7 @@ renderCart();
 // ── Restore cart after a stock error ────────────────────────────────────────
 {% if preserved_cart %}
 (function() {
-  const preserved = {{ preserved_cart|safe }};
+  const preserved = JSON.parse(document.getElementById('preserved-cart').textContent);
   cartOrder = [];
 
   {% if preserved_customer %}

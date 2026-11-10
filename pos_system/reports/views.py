@@ -446,16 +446,25 @@ def shift_report(request):
     sales_qs = sales_qs.select_related('customer', 'cashier').order_by('created_at')
 
     # --- Calculations (all Decimal) ---
+    # Only cash goes into the drawer; GCash/Maya/card/bank sales are settled
+    # elsewhere and must not inflate the expected drawer amount.
     total_sales = Decimal('0.00')
-    for s in sales_qs:
+    by_method = {}
+    for s in sales_qs.prefetch_related('items'):
         sale_total = s.total if isinstance(s.total, Decimal) else Decimal(str(s.total))
         total_sales += sale_total
+        by_method[s.payment_method] = by_method.get(s.payment_method, Decimal('0.00')) + sale_total
 
-    total_gross = total_sales + starting_cash
+    cash_sales = by_method.pop('cash', Decimal('0.00'))
+    non_cash_sales = total_sales - cash_sales
+    method_labels = dict(Sale.PAYMENT_METHODS)
+    non_cash_breakdown = [
+        {'label': method_labels.get(method, method), 'amount': float(amount)}
+        for method, amount in sorted(by_method.items(), key=lambda kv: -kv[1])
+    ]
+
+    total_gross = starting_cash + cash_sales          # cash that should be in the drawer
     net_amount = total_gross - less_collection
-
-    # --- Breakdown ---
-    cash_sales = total_sales
     transaction_count = sales_qs.count()
     avg_transaction = (total_sales / Decimal(str(transaction_count))) if transaction_count else Decimal('0.00')
 
@@ -506,4 +515,6 @@ def shift_report(request):
         'total_refunds': float(total_refunds),
         'refund_count': refund_count,
         'cash_sales': float(cash_sales),
+        'non_cash_sales': float(non_cash_sales),
+        'non_cash_breakdown': non_cash_breakdown,
     })
