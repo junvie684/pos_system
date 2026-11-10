@@ -78,7 +78,9 @@
   </div>
 </div>
 
+{% endblock content %}
 
+{% block modals %}
 <!-- ══════════════════════════════════════════════════ -->
 <!-- MODAL: ADD CUSTOMER                                -->
 <!-- ══════════════════════════════════════════════════ -->
@@ -435,6 +437,7 @@ async function submitDel() {
 function escJs(str) {
   return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
+
 </script>
 
-{% endblock %}
+{% endblock modals %}

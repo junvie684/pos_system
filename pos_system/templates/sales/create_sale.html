@@ -1,191 +1,150 @@
 {% extends 'base.html' %}
 {% block title %}New Sale — POS{% endblock %}
-{% block page_title %}Transaction{% endblock %}
+{% block page_title %}New Sale{% endblock %}
+{% block topbar_actions %}
+<div class="shift-line">Your sales today <b class="fig">₱{{ today_total|floatformat:"2g" }}</b> · <span class="fig">{{ today_count }}</span> sale{{ today_count|pluralize }}</div>
+{% endblock %}
 
 {% block content %}
+<div class="register">
 
-<div style="display:grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: start;">
-
-  <!-- LEFT: Product Grid -->
-  <div>
-    <!-- Search & Filter -->
-    <div style="display:flex; gap:10px; margin-bottom:16px;">
-      <input type="text" id="search-input" placeholder="Search products..."
-             oninput="filterProducts()"
-             style="flex:1; padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
-      <select id="category-filter" onchange="filterProducts()"
-              style="padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
-        <option value="">All Categories</option>
-        {% for category in categories %}
-        <option value="{{ category.name }}">{{ category.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <!-- Barcode Scanner Status Bar -->
-    <div id="scanner-status"
-         style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:10px; margin-bottom:16px;
-                background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); font-size:13px;">
-      <span id="scanner-icon" style="font-size:18px;">📷</span>
-      <div style="flex:1;">
-        <div style="font-weight:500; color:var(--color-text-primary);">Barcode Scanner Ready</div>
-        <div id="scanner-msg" style="font-size:11px; color:var(--color-text-secondary);">Scan any barcode or type manually</div>
-      </div>
-      <input type="text" id="barcode-manual" placeholder="Enter barcode…"
-             style="padding:6px 10px; border:0.5px solid var(--color-border-secondary); border-radius:6px;
-                    background:var(--color-background-primary); color:var(--color-text-primary);
-                    font-size:13px; width:160px;"
-             onkeydown="if(event.key==='Enter'){ handleBarcode(this.value.trim()); this.value=''; }">
-      <button onclick="handleBarcode(document.getElementById('barcode-manual').value.trim()); document.getElementById('barcode-manual').value='';"
-              style="padding:6px 12px; background:#1D9E75; color:#fff; border:none; border-radius:6px; font-size:13px; cursor:pointer;">
-        Add
+  <!-- ── Products ─────────────────────────────────────────── -->
+  <section class="reg-products" aria-label="Products">
+    <div class="scan-field">
+      <i class="bi bi-upc-scan" aria-hidden="true"></i>
+      <label for="scan-input" class="sr-only">Scan a barcode or search products</label>
+      <input type="text" id="scan-input" autocomplete="off" spellcheck="false"
+             placeholder="Scan a barcode or search products"
+             oninput="filterProducts()" onkeydown="onScanKey(event)">
+      <button type="button" class="scan-clear" id="scan-clear" onclick="resetScan()" aria-label="Clear search" hidden>
+        <i class="bi bi-x-lg"></i>
       </button>
     </div>
-
-    <!-- Product Cards -->
-    <div style="font-size:12px; color:var(--color-text-tertiary); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
-      <i class="bi bi-fire" style="color:#f59e0b;"></i>
-      Showing top 20 best-selling products
+    <div class="scan-status" id="scanner-status" role="status" aria-live="polite">
+      <i class="bi bi-upc" id="scanner-icon" aria-hidden="true"></i>
+      <span id="scanner-msg">Ready to scan. Press Enter to add the match.</span>
     </div>
-    <div id="product-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); gap:12px;">
+
+    <div class="cat-chips" role="group" aria-label="Filter by category">
+      <button type="button" class="chip is-on" data-cat="" aria-pressed="true" onclick="setCategory(this)">All</button>
+      {% for category in categories %}
+      <button type="button" class="chip" data-cat="{{ category.name }}" aria-pressed="false" onclick="setCategory(this)">{{ category.name }}</button>
+      {% endfor %}
+    </div>
+
+    <div class="grid-head">
+      <span id="grid-caption">Best sellers</span>
+      <span class="fig" id="grid-count">{{ products|length }} shown</span>
+    </div>
+
+    <div id="product-grid" class="product-grid">
       {% for product in products %}
-      <div class="product-card"
-           data-id="{{ product.pk }}"
-           data-name="{{ product.name }}"
-           data-price="{{ product.price }}"
-           data-stock="{{ product.stock }}"
-           data-category="{{ product.category|default:'' }}"
-           data-barcode="{{ product.barcode|default:'' }}"
-           onclick="addToCart(this)"
-           style="background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:12px; padding:14px 12px; cursor:pointer; transition:border-color .15s, background .15s; user-select:none; overflow:hidden;">
+      <button type="button"
+              class="product-card{% if not product.is_in_stock %} out{% elif product.stock <= 5 %} low{% endif %}"
+              data-id="{{ product.pk }}"
+              data-name="{{ product.name }}"
+              data-price="{{ product.price }}"
+              data-stock="{{ product.stock }}"
+              data-category="{{ product.category|default:'' }}"
+              data-barcode="{{ product.barcode|default:'' }}"
+              onclick="addToCart(this)"
+              {% if not product.is_in_stock %}disabled aria-disabled="true"{% endif %}>
         {% if product.image %}
-          <div style="width:100%; height:100px; border-radius:8px; margin-bottom:8px; overflow:hidden;">
-            <img src="{{ product.image.url }}" alt="{{ product.name }}"
-                 style="width:100%; height:100%; object-fit:cover; display:block;">
-          </div>
-        {% else %}
-          <div style="font-size:28px; text-align:center; margin-bottom:8px;">🛍️</div>
+        <span class="pc-img"><img src="{{ product.image.url }}" alt="" loading="lazy"></span>
         {% endif %}
-        <div style="font-size:13px; font-weight:500; color:var(--color-text-primary); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ product.name }}</div>
-        <div style="font-size:13px; color:var(--color-text-success); font-weight:500;">₱{{ product.price }}</div>
-        <div style="font-size:11px; color:var(--color-text-secondary); margin-top:2px;">Stock: {{ product.stock }}</div>
-        {% if product.total_sold %}
-          <div style="font-size:10px; color:#f59e0b; margin-top:2px;"><i class="bi bi-fire"></i> {{ product.total_sold }} sold</div>
-        {% endif %}
-        {% if not product.is_in_stock %}
-          <div style="font-size:11px; color:var(--color-text-danger); margin-top:4px;">Out of stock</div>
-        {% endif %}
-        {% if product.barcode %}
-          <div style="font-size:10px; color:var(--color-text-tertiary); margin-top:4px; font-family:monospace;">🔖 {{ product.barcode }}</div>
-        {% endif %}
+        <span class="pc-name">{{ product.name }}</span>
+        <span class="pc-meta">
+          {% if product.barcode %}<span class="pc-code">{{ product.barcode }}</span>{% endif %}
+          <span class="pc-stock">{% if not product.is_in_stock %}Out of stock{% elif product.stock <= 5 %}{{ product.stock }} left{% else %}{{ product.stock }} in stock{% endif %}</span>
+        </span>
+        <span class="pc-price">₱{{ product.price }}</span>
+      </button>
+      {% empty %}
+      <div class="grid-empty">
+        <i class="bi bi-box-seam" aria-hidden="true"></i>
+        <p>No products yet. Add products under Inventory, then they'll show up here.</p>
       </div>
       {% endfor %}
     </div>
-  </div>
-
-  <!-- RIGHT: Cart -->
-  <div style="background:var(--color-background-primary); border:0.5px solid var(--color-border-tertiary); border-radius:12px; padding:20px; position:sticky; top:20px;">
-    <div style="font-size:16px; font-weight:500; color:var(--color-text-primary); margin-bottom:16px; padding-bottom:12px; border-bottom:0.5px solid var(--color-border-tertiary);">
-      Current Sale
-      {% if pending_sale %}
-      <span style="font-size:12px; color:#3b82f6; margin-left:8px;">
-        <i class="bi bi-pause-circle"></i> Resuming #{{ pending_sale.pk }}
-      </span>
-      {% endif %}
+    <div class="grid-empty" id="no-match" hidden>
+      <i class="bi bi-search" aria-hidden="true"></i>
+      <p>No product matches. Check the spelling or clear the search.</p>
     </div>
+  </section>
 
-    <!-- Customer -->
-    <div style="margin-bottom:14px;">
-      <label style="font-size:12px; color:var(--color-text-secondary); display:block; margin-bottom:4px;">Customer (optional)</label>
-      <select id="customer-select" style="width:100%; padding:8px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
-        <option value="">Walk-in Customer</option>
+  <!-- ── Receipt / cart ───────────────────────────────────── -->
+  <aside class="reg-cart" id="reg-cart" aria-label="Current sale">
+    <header class="cart-head">
+      <div>
+        <h2>Current sale</h2>
+        <div class="serial">{% if pending_sale %}Resuming N&ordm; {{ pending_sale.pk }}{% else %}New sale{% endif %}</div>
+      </div>
+      <button type="button" class="link-btn" onclick="clearCart()">
+        <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Clear
+      </button>
+    </header>
+
+    <div class="cart-customer">
+      <label for="customer-select" class="sr-only">Customer</label>
+      <i class="bi bi-person" aria-hidden="true"></i>
+      <select id="customer-select" class="cart-select" onchange="refocusScan()">
+        <option value="">Walk-in customer</option>
         {% for customer in customers %}
-        <option value="{{ customer.pk }}" {% if pending_sale and pending_sale.customer and pending_sale.customer.pk == customer.pk %}selected{% endif %}>
-          {{ customer.name }}
-        </option>
+        <option value="{{ customer.pk }}" {% if pending_sale and pending_sale.customer and pending_sale.customer.pk == customer.pk %}selected{% endif %}>{{ customer.name }}</option>
         {% endfor %}
       </select>
     </div>
 
-    <!-- Cart Items -->
-    <div id="cart-items" style="min-height:120px; margin-bottom:14px;">
-      <div style="text-align:center; padding:30px 0; color:var(--color-text-tertiary); font-size:13px;">
-        Click a product or scan a barcode
+    <div class="sheet" id="cart-items" aria-live="polite"></div>
+
+    <div class="cart-total" id="cart-total">
+      <span class="ct-label">Total · <span id="total-items" class="fig">0</span> items</span>
+      <span class="ct-value fig" id="total-price">₱0.00</span>
+    </div>
+
+    <div class="pay-block">
+      <span class="cart-label" id="pm-label">Payment</span>
+      <input type="hidden" id="payment-method-select" value="cash">
+      <div class="pm-grid" role="radiogroup" aria-labelledby="pm-label">
+        <button type="button" class="pm" role="radio" data-pm="cash" aria-checked="true">Cash</button>
+        <button type="button" class="pm" role="radio" data-pm="gcash" aria-checked="false">GCash</button>
+        <button type="button" class="pm" role="radio" data-pm="maya" aria-checked="false">Maya</button>
+        <button type="button" class="pm" role="radio" data-pm="grabpay" aria-checked="false">GrabPay</button>
+        <button type="button" class="pm" role="radio" data-pm="bank_transfer" aria-checked="false">Bank</button>
+        <button type="button" class="pm" role="radio" data-pm="credit_card" aria-checked="false">Credit</button>
+        <button type="button" class="pm" role="radio" data-pm="debit_card" aria-checked="false">Debit</button>
+      </div>
+
+      <div id="reference-number-group" hidden>
+        <label for="reference-number-input" class="cart-label">Reference no.</label>
+        <input type="text" id="reference-number-input" class="cart-input fig" autocomplete="off" placeholder="Transaction reference">
+      </div>
+
+      <div id="cash-tendered-card">
+        <label for="cash-tendered" class="cart-label">Cash received</label>
+        <div class="quick-amounts" id="quick-amounts">
+          <button type="button" class="quick-btn fig" onclick="setTendered(20, this)">₱20</button>
+          <button type="button" class="quick-btn fig" onclick="setTendered(50, this)">₱50</button>
+          <button type="button" class="quick-btn fig" onclick="setTendered(100, this)">₱100</button>
+          <button type="button" class="quick-btn fig" onclick="setTendered(200, this)">₱200</button>
+          <button type="button" class="quick-btn fig" onclick="setTendered(500, this)">₱500</button>
+          <button type="button" class="quick-btn fig" onclick="setTendered(1000, this)">₱1000</button>
+          <button type="button" class="quick-btn" onclick="setExact(this)">Exact</button>
+        </div>
+        <div class="cash-row">
+          <input type="number" id="cash-tendered" class="cart-input fig" placeholder="Exact if blank" min="0" step="0.01" inputmode="decimal" oninput="clearQuick(); calcChange()" aria-label="Cash received">
+          <div class="change-row">
+            <span>Change</span>
+            <span id="change-due" class="fig">₱0.00</span>
+          </div>
+        </div>
+        <div id="insufficient-warning" class="cart-warn" hidden>
+          <i class="bi bi-exclamation-circle" aria-hidden="true"></i> Cash received is less than the total.
+        </div>
       </div>
     </div>
 
-    <!-- Totals -->
-    <div style="border-top:0.5px solid var(--color-border-tertiary); padding-top:12px; margin-bottom:14px;">
-      <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--color-text-secondary); margin-bottom:6px;">
-        <span>Items</span><span id="total-items">0</span>
-      </div>
-      <div style="display:flex; justify-content:space-between; font-size:16px; font-weight:600; color:var(--color-text-primary);">
-        <span>Total</span><span id="total-price">₱0.00</span>
-      </div>
-    </div>
-
-    <!-- Cash Tendered -->
-    <div id="cash-tendered-card" style="background:var(--color-background-secondary); border-radius:10px; padding:12px; margin-bottom:14px;">
-      <label style="font-size:12px; color:var(--color-text-secondary); display:block; margin-bottom:6px;">Cash Tendered</label>
-
-      <!-- Quick amount buttons -->
-      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;" id="quick-amounts">
-        <button class="quick-btn" onclick="setTendered(20)">₱20</button>
-        <button class="quick-btn" onclick="setTendered(50)">₱50</button>
-        <button class="quick-btn" onclick="setTendered(100)">₱100</button>
-        <button class="quick-btn" onclick="setTendered(200)">₱200</button>
-        <button class="quick-btn" onclick="setTendered(500)">₱500</button>
-        <button class="quick-btn" onclick="setExact()">Exact</button>
-      </div>
-
-      <!-- Manual input -->
-      <input type="number" id="cash-tendered" placeholder="0.00" min="0" step="0.01"
-             oninput="calcChange()"
-             style="width:100%; padding:9px 12px; border:0.5px solid var(--color-border-secondary);
-                    border-radius:8px; background:var(--color-background-primary);
-                    color:var(--color-text-primary); font-size:15px; font-weight:600;
-                    box-sizing:border-box; outline:none;">
-
-      <!-- Change due -->
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
-        <span style="font-size:12px; color:var(--color-text-secondary);">Change Due</span>
-        <span id="change-due"
-              style="font-size:18px; font-weight:700; color:#34d399;">₱0.00</span>
-      </div>
-
-      <!-- Insufficient warning -->
-      <div id="insufficient-warning"
-           style="display:none; margin-top:8px; font-size:12px; color:#f87171;
-                  background:rgba(239,68,68,0.1); border-radius:6px; padding:6px 10px;">
-        ⚠️ Cash tendered is less than total
-      </div>
-    </div>
-
-    <!-- Mode of Payment -->
-    <div style="margin-bottom:14px;">
-      <label style="font-size:12px; color:var(--color-text-secondary); display:block; margin-bottom:4px;">Mode of Payment</label>
-      <select id="payment-method-select"
-              onchange="onPaymentMethodChange()"
-              style="width:100%; padding:8px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:13px;">
-        <option value="cash">Cash</option>
-        <option value="gcash">GCash</option>
-        <option value="maya">Maya</option>
-        <option value="grabpay">GrabPay</option>
-        <option value="bank_transfer">Bank Transfer</option>
-        <option value="credit_card">Credit Card</option>
-        <option value="debit_card">Debit Card</option>
-      </select>
-
-      <div id="reference-number-group" style="display:none; margin-top:8px;">
-        <input type="text" id="reference-number-input" placeholder="Reference / Transaction No."
-               style="width:100%; padding:8px 12px; border:0.5px solid var(--color-border-secondary);
-                      border-radius:8px; background:var(--color-background-primary);
-                      color:var(--color-text-primary); font-size:13px; box-sizing:border-box; outline:none;">
-      </div>
-    </div>
-
-    <!-- Form -->
-    <form method="post" id="sale-form" action="{% if pending_sale %}{% url 'sales:resume_sale' pending_sale.pk %}{% else %}{% url 'sales:create_sale' %}{% endif %}">
+    <form method="post" id="sale-form" class="cart-actions" action="{% if pending_sale %}{% url 'sales:resume_sale' pending_sale.pk %}{% else %}{% url 'sales:create_sale' %}{% endif %}">
       {% csrf_token %}
       <input type="hidden" name="customer" id="form-customer">
       <input type="hidden" name="status" id="form-status" value="completed">
@@ -194,64 +153,257 @@
       <input type="hidden" name="payment_method" id="form-payment-method" value="cash">
       <input type="hidden" name="reference_number" id="form-reference-number">
       <div id="form-items"></div>
-
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <button type="button" id="complete-btn" onclick="completeSale()"
-                style="flex:1; padding:11px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:500; cursor:pointer; transition:background .15s;">
-          Complete Sale
-        </button>
-        <button type="button" onclick="saveAsPending()"
-                style="flex:1; padding:11px; background:transparent; color:var(--color-text-secondary); border:0.5px solid var(--color-border-secondary); border-radius:8px; font-size:14px; cursor:pointer;">
-          <i class="bi bi-pause-circle"></i> Hold Sale
-        </button>
-      </div>
-      <button type="button" onclick="clearCart()"
-              style="width:100%; padding:9px; background:transparent; color:var(--color-text-secondary); border:0.5px solid var(--color-border-secondary); border-radius:8px; font-size:13px; cursor:pointer;">
-        Clear
+      <button type="button" class="btn btn-ghost act-hold" onclick="saveAsPending()">
+        <i class="bi bi-pause-circle" aria-hidden="true"></i> Hold
+      </button>
+      <button type="button" class="btn btn-commit act-go" id="complete-btn" onclick="completeSale()">
+        Complete sale
       </button>
     </form>
-  </div>
+  </aside>
+
+  <!-- Phone: total bar that jumps to the receipt -->
+  <button type="button" class="mobile-bar" id="mobile-bar" onclick="document.getElementById('reg-cart').scrollIntoView({behavior:'smooth'})">
+    <span><span id="mb-items" class="fig">0</span> items</span>
+    <span class="fig" id="mb-total">₱0.00</span>
+    <span class="mb-go">Pay <i class="bi bi-arrow-down" aria-hidden="true"></i></span>
+  </button>
 </div>
 
-<!-- Toast -->
-<div id="toast"
-     style="position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(80px);
-            padding:10px 20px; border-radius:10px; font-size:13px; font-weight:500;
-            color:#fff; z-index:9999; transition:transform .3s ease, opacity .3s ease; opacity:0; pointer-events:none;">
-</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <style>
-.product-card:hover {
-  border-color: #1D9E75 !important;
-  background: var(--color-background-secondary) !important;
-  transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(29,158,117,0.2);
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+
+/* Register fills the content area edge to edge */
+.content:has(> .register) { padding: 0; }
+.content:has(> .register) > #messages-container { margin: 16px 24px 0 !important; }
+.register {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  min-height: calc(100dvh - var(--topbar-h));
 }
-.product-card:hover img { transform: scale(1.07); }
-.product-card:active { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(29,158,117,0.15); }
-.product-card.out { opacity:0.45; pointer-events:none; }
-.product-card.flash-success {
-  border-color: #1D9E75 !important;
-  background: rgba(29,158,117,0.1) !important;
+
+/* ── Products ── */
+.reg-products { padding: 20px 24px 32px; min-width: 0; }
+.scan-field {
+  position: relative; display: flex; align-items: center;
+  height: 54px; padding: 4px 0; background: var(--panel);
+  border: 1px solid #9AA2B1; border-radius: var(--radius);
+  transition: border-color .12s, box-shadow .12s;
 }
-.cart-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:13px; }
-.qty-btn { width:24px; height:24px; border:0.5px solid var(--color-border-secondary); border-radius:6px; background:var(--color-background-secondary); color:var(--color-text-primary); cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; }
-.qty-btn:hover { background:var(--color-background-tertiary); }
-.quick-btn {
-  padding:4px 10px; font-size:12px; border-radius:6px; cursor:pointer;
-  border:0.5px solid var(--color-border-secondary);
-  background:var(--color-background-primary); color:var(--color-text-secondary);
-  transition:all .15s;
+.scan-field:focus-within { border-color: var(--ink); box-shadow: 0 0 0 3px var(--carbon); }
+.scan-field > .bi { font-size: 20px; color: var(--ink-2); padding: 0 6px 0 16px; }
+.scan-field input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font-size: 17px; padding: 0 8px; }
+.scan-field input::placeholder { color: var(--ink-3); }
+.scan-clear { width: 44px; height: 44px; margin-right: 4px; border: 0; background: none; border-radius: var(--radius); color: var(--ink-2); cursor: pointer; }
+.scan-clear:hover { background: var(--paper-2); color: var(--ink); }
+.scan-status { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 6px 2px 0; font-size: 13.5px; color: var(--ink-3); }
+.scan-status.ok { color: var(--green); }
+.scan-status.warn { color: var(--amber-ink); }
+.scan-status.err { color: var(--red); }
+
+.cat-chips { display: flex; gap: 8px; margin: 10px 0 16px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.cat-chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex-shrink: 0; height: 40px; padding: 0 16px;
+  border: 1px solid var(--chip-rule); border-radius: var(--radius);
+  background: var(--panel); font-size: 14px; font-weight: 600; color: var(--ink);
+  cursor: pointer; transition: background-color .12s, border-color .12s, color .12s;
 }
-.quick-btn:hover { background:#1D9E75; color:#fff; border-color:#1D9E75; }
-.quick-btn.active { background:#1D9E75; color:#fff; border-color:#1D9E75; }
+.chip:hover { border-color: var(--rule-strong); background: var(--paper-2); }
+.chip.is-on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+.grid-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 600; color: var(--ink-3); padding-bottom: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--rule); }
+.grid-head .fig { font-size: 12px; font-weight: 500; }
+
+.product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 10px; }
+.product-card {
+  display: flex; flex-direction: column; align-items: stretch; text-align: left;
+  min-height: 128px; padding: 12px; gap: 4px;
+  background: var(--panel); border: 1px solid #E1E2E5; border-radius: var(--radius);
+  cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+  transition: border-color .12s, background-color .12s, transform .12s var(--ease-out);
+}
+.product-card:hover { border-color: var(--ink); }
+.product-card:active { transform: scale(.98); background: var(--carbon); }
+.product-card.flash-success { border-color: var(--green); background: var(--green-tint); }
+.product-card.out { opacity: .5; cursor: not-allowed; background: var(--paper-2); }
+.product-card.out:hover { border-color: #E1E2E5; }
+.pc-img { display: block; height: 76px; margin: -4px -4px 6px; border-radius: 4px; overflow: hidden; background: var(--paper-2); }
+.pc-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-name { font-size: 15px; font-weight: 600; line-height: 1.25; text-wrap: balance; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pc-meta { display: flex; flex-direction: column; font-family: var(--font-fig); font-size: 11.5px; color: var(--ink-3); line-height: 1.4; }
+.pc-code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-card.low .pc-stock { color: var(--amber-ink); font-weight: 700; }
+.pc-price { margin-top: auto; padding-top: 4px; font-family: var(--font-fig); font-variant-numeric: tabular-nums; font-size: 19px; font-weight: 700; color: var(--ink); letter-spacing: -.3px; }
+.grid-empty { grid-column: 1 / -1; text-align: center; padding: 48px 16px; color: var(--ink-3); }
+.grid-empty .bi { font-size: 28px; display: block; margin-bottom: 8px; color: var(--rule-strong); }
+
+/* ── Receipt column ── */
+.reg-cart {
+  background: var(--carbon); border-left: 1px solid var(--carbon-rule);
+  padding: 16px 22px 18px; display: flex; flex-direction: column; gap: 12px;
+  position: sticky; top: var(--topbar-h);
+  height: calc(100dvh - var(--topbar-h)); overflow: hidden;
+}
+.cart-customer { position: relative; }
+.cart-customer > .bi { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-2); pointer-events: none; }
+.cart-customer .cart-select { padding-left: 36px; height: 40px; }
+.cart-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.cart-head h2 { font-size: 20px; font-weight: 800; line-height: 1.2; }
+.serial { font-family: var(--font-fig); font-size: 14px; font-weight: 700; color: var(--red); letter-spacing: .5px; margin-top: 2px; }
+.link-btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; margin: -4px -10px 0 0; border: 0; background: none; border-radius: var(--radius); font-size: 14px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.link-btn:hover { background: rgba(30,36,48,.06); color: var(--ink); }
+
+.cart-label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+.cart-select, .cart-input {
+  width: 100%; height: 44px; padding: 0 12px;
+  background: var(--panel); border: 1px solid #B9C4D3; border-radius: var(--radius);
+  font-size: 15px; color: var(--ink); outline: none;
+  transition: border-color .12s, box-shadow .12s;
+}
+.cart-select:focus, .cart-input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px #fff; }
+.cart-input.fig { font-size: 18px; font-weight: 600; }
+
+.sheet { background: var(--panel); border: 1px solid var(--carbon-rule); border-radius: var(--radius); padding: 2px 14px; flex: 1 1 auto; min-height: 120px; overflow-y: auto; overscroll-behavior: contain; }
+.sheet-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 126px; color: var(--ink-3); font-size: 14px; text-align: center; }
+.sheet-empty .bi { font-size: 22px; color: var(--carbon-rule); }
+.line { display: grid; grid-template-columns: minmax(0,1fr) auto 84px; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px dashed #D3DBE6; }
+.line:last-child { border-bottom: 0; }
+.line-name { font-size: 15px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.line-unit { display: block; font-family: var(--font-fig); font-size: 11.5px; font-weight: 400; color: var(--ink-3); margin-top: 1px; }
+.line-err { display: block; font-size: 12.5px; font-weight: 600; color: var(--red); margin-top: 2px; }
+.line.has-error .line-name { color: var(--red); }
+.stepper { display: flex; align-items: center; gap: 4px; }
+.qty-btn { width: 36px; height: 36px; border: 1px solid #C3CCD8; border-radius: var(--radius); background: var(--panel); color: var(--ink); font-size: 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.qty-btn:hover { background: var(--carbon); }
+.qty { min-width: 28px; text-align: center; font-family: var(--font-fig); font-weight: 700; font-size: 15px; }
+.line-sub { text-align: right; font-family: var(--font-fig); font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
+.line.is-new { animation: lineIn .22s var(--ease-out); }
+.line.is-new .line-sub { animation: figPulse .5s var(--ease-out); }
+@keyframes lineIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes figPulse { 0% { color: var(--red); } 100% { color: var(--ink); } }
+
+.cart-total { flex-shrink: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-top: 2px solid var(--ink); padding-top: 10px; }
+.ct-label { font-size: 15px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.ct-value { font-size: 44px; font-weight: 700; letter-spacing: -1.5px; line-height: 1; color: var(--ink); }
+.ct-value.bump { animation: totalBump .26s var(--ease-out); }
+@keyframes totalBump { from { transform: translateY(3px); opacity: .6; } to { transform: none; opacity: 1; } }
+
+.pay-block { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
+.pay-block .cart-label { margin-bottom: -6px; }
+.pm-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.pm { height: 44px; border: 1px solid #B9C4D3; border-radius: var(--radius); background: var(--panel); font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer; transition: background-color .12s, border-color .12s, color .12s; }
+.pm:hover { border-color: var(--ink); }
+.pm[aria-checked="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+#reference-number-group .cart-label, #cash-tendered-card > .cart-label { margin-bottom: 6px; }
+.quick-amounts { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-bottom: 8px; }
+.quick-btn { height: 40px; padding: 0; font-size: 13px !important; border: 1px solid #C9D2DE; border-radius: var(--radius); background: #F6F8FB; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer; transition: background-color .12s, border-color .12s, color .12s; }
+.quick-btn:hover { border-color: var(--ink); background: var(--panel); }
+.quick-btn.active { background: var(--ink); border-color: var(--ink); color: #fff; }
+.cash-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.change-row { display: flex; flex-direction: column; align-items: flex-end; font-size: 13px; font-weight: 700; color: var(--ink-2); line-height: 1.1; }
+#change-due { font-size: 26px; font-weight: 700; color: var(--green); letter-spacing: -.5px; }
+#change-due.zero { color: var(--ink-3); }
+.shift-line { font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+.shift-line b { color: var(--ink); font-weight: 700; }
+@media (max-width: 600px) { .shift-line { display: none; } }
+.line-name { text-wrap: pretty; }
+.sheet.overflows { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+.sheet.overflows.at-end { -webkit-mask-image: none; mask-image: none; }
+/* Short screens (1366x768, 1024x768): give the receipt more lines */
+@media (max-height: 820px) and (min-width: 768px) {
+  .reg-cart { gap: 9px; padding-top: 12px; padding-bottom: 12px; }
+  .cart-head { align-items: center; }
+  .cart-head h2 { font-size: 18px; }
+  .cart-customer .cart-select { height: 36px; }
+  .pm-grid { grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .pm { height: 38px; font-size: 12.5px; padding: 0; }
+  #pm-label { display: none; }
+  .quick-btn { height: 36px; }
+  .cart-input { height: 40px; }
+  .ct-value { font-size: 36px; }
+  .act-hold, .act-go { min-height: 50px; }
+  .line { padding: 6px 0; }
+  .qty-btn { width: 32px; height: 32px; }
+}
+/* Touch screens keep 44px targets even when short */
+@media (max-height: 820px) and (min-width: 768px) and (pointer: coarse) {
+  .qty-btn { width: 44px; height: 44px; }
+  .pm, .quick-btn, .cart-customer .cart-select { height: 44px; }
+  .pm-grid { grid-template-columns: repeat(4, 1fr); }
+  .pm { font-size: 14px; }
+}
+#change-due.short { color: var(--red); }
+.cart-warn { margin-top: 8px; padding: 8px 10px; border-radius: var(--radius); background: var(--red-tint); color: #8E1C22; font-size: 13.5px; font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.cart-warn[hidden], #reference-number-group[hidden], #cash-tendered-card[hidden] { display: none; }
+
+.cart-actions { flex-shrink: 0; display: grid; grid-template-columns: 1fr 2fr; gap: 8px; padding-top: 2px; }
+@media (max-height: 700px) and (min-width: 768px) { .reg-cart { overflow-y: auto; } .sheet { flex: 0 0 auto; max-height: none; } }
+.cart-actions #form-items { display: none; }
+.act-hold, .act-go { min-height: 58px; font-size: 17px; font-weight: 700; }
+.act-hold { border-width: 2px; border-color: var(--ink); }
+.act-go:disabled { background: #8F96A3; opacity: 1; }
+
+.mobile-bar { display: none; }
+
+/* ── Toast ── */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; z-index: 9999;
+  transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-radius: var(--radius);
+  background: var(--ink); color: #fff; font-size: 14px; font-weight: 600;
+  box-shadow: 0 8px 24px rgba(30,36,48,.25);
+  transition: transform .22s var(--ease-out), opacity .22s var(--ease-out);
+  max-width: calc(100vw - 32px);
+}
+.toast.show { transform: translate(-50%, 0); opacity: 1; }
+.toast .bi { font-size: 16px; }
+.toast.ok .bi { color: #7BD3A0; }
+.toast.warn .bi { color: #F2C46B; }
+.toast.err { background: var(--red); }
+
+/* ── Tablet ── */
+@media (max-width: 1199px) { .register { grid-template-columns: minmax(0,1fr) 400px; } .ct-value { font-size: 38px; } }
+@media (max-width: 991px) {
+  .register { grid-template-columns: minmax(0,1fr) 372px; }
+  .quick-amounts { grid-template-columns: repeat(4, 1fr); }
+  .reg-products { padding: 16px 16px 28px; }
+  .reg-cart { padding: 16px; }
+}
+/* ── Phone: stack, receipt below, sticky total bar ── */
+@media (max-width: 767px) {
+  .register { display: block; min-height: 0; }
+  .reg-products { padding: 14px 14px 20px; }
+  .product-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .quick-amounts { grid-template-columns: repeat(4, 1fr); }
+  .sheet { overflow: visible; }
+  .reg-cart { position: static; height: auto; overflow: visible; border-left: 0; border-top: 1px solid var(--carbon-rule); padding: 18px 14px 96px; }
+  .mobile-bar {
+    position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 60;
+    display: flex; align-items: center; gap: 14px; height: 56px; padding: 0 8px 0 16px;
+    border: 0; border-radius: 8px; background: var(--ink); color: #fff; font-size: 15px; font-weight: 600;
+    box-shadow: 0 8px 24px rgba(30,36,48,.3); cursor: pointer;
+  }
+  .mobile-bar .fig#mb-total { font-size: 20px; font-weight: 700; margin-left: auto; }
+  .mb-go { height: 40px; padding: 0 14px; border-radius: var(--radius); background: var(--red); display: inline-flex; align-items: center; gap: 6px; }
+  .mobile-bar.is-hidden { display: none; }
+  .toast { bottom: 80px; }
+}
 </style>
 
 <script>
-// ── Barcode scanner ──────────────────────────────────────────────────────────
-let barcodeBuffer = '';
-let barcodeTimer  = null;
+// ── Helpers ─────────────────────────────────────────────────────────────────
+const peso = n => '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const scanInput = document.getElementById('scan-input');
 
+// ── Barcode scanner ─────────────────────────────────────────────────────────
+// Scanner bursts: keys arrive <35ms apart and end in Enter. Outside the scan
+// field they are caught anywhere (even in Cash received or the customer list):
+// whatever they typed is undone and the product is added instead.
 function buildBarcodeMap() {
   const map = {};
   document.querySelectorAll('.product-card[data-barcode]').forEach(card => {
@@ -260,251 +412,331 @@ function buildBarcodeMap() {
   });
   return map;
 }
-let barcodeMap = buildBarcodeMap();
+const barcodeMap = buildBarcodeMap();
 
+let burst = { keys: '', last: 0, target: null, before: null };
+const resetBurst = () => { burst = { keys: '', last: 0, target: null, before: null }; };
 document.addEventListener('keydown', function(e) {
-  const tag = document.activeElement.tagName;
-  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  const el = document.activeElement;
+  if (el === scanInput) return;
+  const now = performance.now();
+  const isField = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
   if (e.key === 'Enter') {
-    if (barcodeBuffer.length >= 3) handleBarcode(barcodeBuffer);
-    barcodeBuffer = '';
-    clearTimeout(barcodeTimer);
+    const fast = now - burst.last < 60;
+    if (burst.keys.length >= 3 && (fast || !isField)) {
+      e.preventDefault();
+      if (burst.target && burst.before !== null) {
+        burst.target.value = burst.before;
+        if (burst.target.id === 'cash-tendered') calcChange();
+      }
+      handleBarcode(burst.keys);
+      refocusScan();
+    }
+    resetBurst();
     return;
   }
-  if (e.key.length === 1) {
-    barcodeBuffer += e.key;
-    clearTimeout(barcodeTimer);
-    barcodeTimer = setTimeout(() => { barcodeBuffer = ''; }, 300);
-  }
+  if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+  // In a text field only machine-speed typing counts; elsewhere allow 300ms
+  if (burst.keys && now - burst.last > (isField ? 35 : 300)) resetBurst();
+  if (!burst.keys) { burst.target = isField ? el : null; burst.before = isField ? el.value : null; }
+  burst.keys += e.key;
+  burst.last = now;
 });
+
+function refocusScan() {
+  if (window.matchMedia('(pointer: fine)').matches) scanInput.focus({ preventScroll: true });
+}
+
+function onScanKey(e) {
+  if (e.key === 'Escape') { resetScan(); return; }
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const code = scanInput.value.trim();
+  if (!code) return;
+  if (barcodeMap[code]) { handleBarcode(code); resetScan(); return; }
+  const visible = [...document.querySelectorAll('.product-card')].filter(c => c.style.display !== 'none' && !c.disabled);
+  if (visible.length === 1) {
+    addToCart(visible[0]);
+    setScannerMsg('Added ' + visible[0].dataset.name, 'ok');
+    resetScan();
+  } else if (visible.length > 1) {
+    setScannerMsg(visible.length + ' products match. Tap the one you want.', 'warn');
+  } else {
+    setScannerMsg('No product or barcode matches "' + code + '".', 'err');
+    showToast('No match for ' + code, 'err');
+  }
+}
+
+function resetScan() {
+  scanInput.value = '';
+  filterProducts();
+  scanInput.focus();
+}
 
 function handleBarcode(code) {
   if (!code) return;
   const card = barcodeMap[code];
-  if (!card) { showToast('❌ Barcode not found: ' + code, '#e74c3c'); setScannerMsg('Not found: ' + code, '❌'); return; }
-  if (parseInt(card.dataset.stock) === 0) { showToast('⚠️ Out of stock: ' + card.dataset.name, '#e67e22'); setScannerMsg('Out of stock: ' + card.dataset.name, '⚠️'); return; }
+  if (!card) { showToast('Barcode not found: ' + code, 'err'); setScannerMsg('Barcode not found: ' + code, 'err'); return; }
+  if (parseInt(card.dataset.stock) === 0) { showToast('Out of stock: ' + card.dataset.name, 'warn'); setScannerMsg('Out of stock: ' + card.dataset.name, 'warn'); return; }
   addToCart(card);
   card.classList.add('flash-success');
   setTimeout(() => card.classList.remove('flash-success'), 400);
-  setScannerMsg('Added: ' + card.dataset.name, '✅');
-  showToast('✅ Added: ' + card.dataset.name);
+  setScannerMsg('Added ' + card.dataset.name, 'ok');
 }
 
-function setScannerMsg(msg, icon) {
+const SCAN_ICONS = { ok: 'bi-check-circle', warn: 'bi-exclamation-triangle', err: 'bi-x-circle', idle: 'bi-upc' };
+function setScannerMsg(msg, kind) {
+  const box = document.getElementById('scanner-status');
+  box.className = 'scan-status ' + (kind || '');
+  document.getElementById('scanner-icon').className = 'bi ' + (SCAN_ICONS[kind] || SCAN_ICONS.idle);
   document.getElementById('scanner-msg').textContent = msg;
-  document.getElementById('scanner-icon').textContent = icon || '📷';
   clearTimeout(setScannerMsg._t);
   setScannerMsg._t = setTimeout(() => {
-    document.getElementById('scanner-msg').textContent = 'Scan any barcode or type manually';
-    document.getElementById('scanner-icon').textContent = '📷';
+    box.className = 'scan-status';
+    document.getElementById('scanner-icon').className = 'bi ' + SCAN_ICONS.idle;
+    document.getElementById('scanner-msg').textContent = 'Ready to scan. Press Enter to add the match.';
   }, 3000);
 }
 
-// ── Auto-focus barcode input on page load ────────────────────────────────────
-document.addEventListener('DOMContentLoaded', function() {
-    const barcodeInput = document.getElementById('barcode-manual');
-    if (barcodeInput) {
-        barcodeInput.focus();
-    }
-});
+document.addEventListener('DOMContentLoaded', () => scanInput.focus());
 
-// ── Toast ────────────────────────────────────────────────────────────────────
-function showToast(msg, color) {
+// ── Toast ───────────────────────────────────────────────────────────────────
+const TOAST_ICONS = { ok: 'bi-check-circle-fill', warn: 'bi-exclamation-triangle-fill', err: 'bi-x-circle-fill', info: 'bi-info-circle-fill' };
+function showToast(msg, tone) {
+  tone = tone || 'ok';
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.background = color || '#1D9E75';
-  t.style.opacity = '1';
-  t.style.transform = 'translateX(-50%) translateY(0)';
+  t.className = 'toast ' + tone;
+  t.innerHTML = '<i class="bi ' + TOAST_ICONS[tone] + '" aria-hidden="true"></i><span></span>';
+  t.querySelector('span').textContent = msg;
+  requestAnimationFrame(() => t.classList.add('show'));
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => {
-    t.style.opacity = '0';
-    t.style.transform = 'translateX(-50%) translateY(80px)';
-  }, 2500);
+  showToast._t = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
-// ── Cart ─────────────────────────────────────────────────────────────────────
+// ── Cart ────────────────────────────────────────────────────────────────────
 let cart = {};
+let cartOrder = [];   // ids in the order they were added, so the receipt reads top to bottom
 let cartTotal = 0;
+let lastAddedId = null;
+
+function orderedIds() {
+  const ids = cartOrder.filter(id => cart[id]);
+  Object.keys(cart).forEach(id => { if (!ids.includes(id)) ids.push(id); });
+  cartOrder = ids;
+  return ids;
+}
 
 function addToCart(el) {
   if (parseInt(el.dataset.stock) === 0) return;
   const id = el.dataset.id;
   if (cart[id]) {
     if (cart[id].qty >= parseInt(el.dataset.stock)) {
-      showToast('⚠️ Max stock reached for ' + el.dataset.name, '#e67e22');
+      showToast('Only ' + el.dataset.stock + ' of ' + el.dataset.name + ' in stock', 'warn');
       return;
     }
     cart[id].qty++;
   } else {
     cart[id] = { id, name: el.dataset.name, price: parseFloat(el.dataset.price), qty: 1, stock: parseInt(el.dataset.stock) };
+    cartOrder.push(id);
   }
+  lastAddedId = id;
   renderCart();
 }
 
 function changeQty(id, delta) {
   if (!cart[id]) return;
+  if (delta > 0 && cart[id].qty >= cart[id].stock) {
+    showToast('Only ' + cart[id].stock + ' of ' + cart[id].name + ' in stock', 'warn');
+    return;
+  }
   cart[id].qty += delta;
   if (cart[id].qty <= 0) delete cart[id];
+  else if (cart[id].hasError && cart[id].qty <= cart[id].stock) cart[id].hasError = false;
+  lastAddedId = delta > 0 ? id : null;
   renderCart();
 }
 
 function renderCart() {
   const container = document.getElementById('cart-items');
-  const keys = Object.keys(cart);
+  const keys = orderedIds();
+  let total = 0, totalItems = 0;
+
   if (keys.length === 0) {
-    container.innerHTML = '<div style="text-align:center; padding:30px 0; color:var(--color-text-tertiary); font-size:13px;">Click a product or scan a barcode</div>';
-    document.getElementById('total-items').textContent = '0';
-    document.getElementById('total-price').textContent = '₱0.00';
-    cartTotal = 0;
-    calcChange();
-    return;
+    container.innerHTML = '<div class="sheet-empty"><i class="bi bi-receipt" aria-hidden="true"></i>Scan a barcode or tap a product to start.</div>';
+  } else {
+    let html = '';
+    keys.forEach(id => {
+      const item = cart[id];
+      const sub = item.price * item.qty;
+      total += sub; totalItems += item.qty;
+      const err = item.hasError ? '<span class="line-err">Only ' + item.stock + ' in stock. Lower the quantity.</span>' : '';
+      html += '<div class="line' + (item.hasError ? ' has-error' : '') + (id === lastAddedId ? ' is-new' : '') + '" data-id="' + esc(id) + '">'
+        + '<div class="line-name">' + esc(item.name) + '<span class="line-unit">' + peso(item.price) + ' each</span>' + err + '</div>'
+        + '<div class="stepper">'
+        +   '<button type="button" class="qty-btn" onclick="changeQty(\'' + esc(id) + '\',-1)" aria-label="One less ' + esc(item.name) + '"><i class="bi bi-dash"></i></button>'
+        +   '<span class="qty">' + item.qty + '</span>'
+        +   '<button type="button" class="qty-btn" onclick="changeQty(\'' + esc(id) + '\',1)" aria-label="One more ' + esc(item.name) + '"><i class="bi bi-plus"></i></button>'
+        + '</div>'
+        + '<span class="line-sub">' + peso(sub) + '</span>'
+        + '</div>';
+    });
+    container.innerHTML = html;
   }
-  let html = '', total = 0, totalItems = 0;
-  keys.forEach(id => {
-    const item = cart[id];
-    const sub = item.price * item.qty;
-    total += sub; totalItems += item.qty;
-    html += `<div class="cart-row">
-      <div style="flex:1; font-weight:500; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${item.name}</div>
-      <button class="qty-btn" onclick="changeQty('${id}',-1)">−</button>
-      <span style="min-width:20px; text-align:center; color:var(--color-text-primary);">${item.qty}</span>
-      <button class="qty-btn" onclick="changeQty('${id}',1)">+</button>
-      <span style="min-width:60px; text-align:right; color:var(--color-text-primary);">₱${sub.toFixed(2)}</span>
-    </div>`;
-  });
-  container.innerHTML = html;
+
+  const totalEl = document.getElementById('total-price');
+  const changed = total !== cartTotal;
   document.getElementById('total-items').textContent = totalItems;
-  document.getElementById('total-price').textContent = '₱' + total.toFixed(2);
+  totalEl.textContent = peso(total);
+  document.getElementById('mb-items').textContent = totalItems;
+  document.getElementById('mb-total').textContent = peso(total);
+  if (changed) { totalEl.classList.remove('bump'); void totalEl.offsetWidth; totalEl.classList.add('bump'); }
   cartTotal = total;
+  const fresh = container.querySelector('.line.is-new');
+  if (fresh) fresh.scrollIntoView({ block: 'nearest' });
+  updateSheetFade();
+  lastAddedId = null;
   calcChange();
 }
 
-// ── Cash tendered & change ───────────────────────────────────────────────────
+function updateSheetFade() {
+  const sh = document.getElementById('cart-items');
+  sh.classList.toggle('overflows', sh.scrollHeight > sh.clientHeight + 2);
+  sh.classList.toggle('at-end', sh.scrollTop + sh.clientHeight >= sh.scrollHeight - 2);
+}
+document.getElementById('cart-items').addEventListener('scroll', updateSheetFade, { passive: true });
+window.addEventListener('resize', updateSheetFade);
+
+// ── Cash received & change ──────────────────────────────────────────────────
 function calcChange() {
   const tendered = parseFloat(document.getElementById('cash-tendered').value) || 0;
   const change = tendered - cartTotal;
   const changeEl = document.getElementById('change-due');
   const warning  = document.getElementById('insufficient-warning');
   const btn      = document.getElementById('complete-btn');
+  const isCash   = document.getElementById('payment-method-select').value === 'cash';
+  const paid     = isCash && tendered > 0;
+  const short    = paid && change < 0;
 
-  if (tendered === 0 || cartTotal === 0) {
-    changeEl.textContent = '₱0.00';
-    changeEl.style.color = '#34d399';
-    warning.style.display = 'none';
-    btn.style.background = '#1D9E75';
-    btn.style.opacity = '1';
-    btn.style.cursor = 'pointer';
-    return;
-  }
-
-  if (change < 0) {
-    changeEl.textContent = '−₱' + Math.abs(change).toFixed(2);
-    changeEl.style.color = '#f87171';
-    warning.style.display = 'block';
-    btn.style.background = '#374151';
-    btn.style.opacity = '0.6';
-    btn.style.cursor = 'not-allowed';
-  } else {
-    changeEl.textContent = '₱' + change.toFixed(2);
-    changeEl.style.color = '#34d399';
-    warning.style.display = 'none';
-    btn.style.background = '#1D9E75';
-    btn.style.opacity = '1';
-    btn.style.cursor = 'pointer';
-  }
+  changeEl.textContent = short ? '−' + peso(Math.abs(change)) : peso(paid ? change : 0);
+  changeEl.classList.toggle('short', short);
+  changeEl.classList.toggle('zero', !(paid && change > 0) && !short);
+  warning.hidden = !short;
+  btn.disabled = cartTotal === 0 || short;
 }
 
-function setTendered(amount) {
+function clearQuick() { document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active')); }
+
+function setTendered(amount, btn) {
   document.getElementById('cash-tendered').value = amount.toFixed(2);
-  document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
+  clearQuick();
+  if (btn) btn.classList.add('active');
   calcChange();
+  refocusScan();
 }
 
-function setExact() {
+function setExact(btn) {
   document.getElementById('cash-tendered').value = cartTotal.toFixed(2);
-  document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
-  event.target.classList.add('active');
+  clearQuick();
+  if (btn) btn.classList.add('active');
   calcChange();
+  refocusScan();
 }
 
-// ── Mode of Payment ──────────────────────────────────────────────────────────
+// ── Payment method ──────────────────────────────────────────────────────────
 const EWALLET_METHODS = ['gcash', 'maya', 'grabpay', 'shopeepay', 'bank_transfer'];
 
+const pmButtons = [...document.querySelectorAll('.pm')];
+pmButtons.forEach((b, i) => {
+  b.addEventListener('click', () => {
+    document.getElementById('payment-method-select').value = b.dataset.pm;
+    onPaymentMethodChange();
+    if (EWALLET_METHODS.includes(b.dataset.pm)) document.getElementById('reference-number-input').focus();
+    else refocusScan();
+  });
+  b.addEventListener('keydown', e => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const next = pmButtons[(i + step + pmButtons.length) % pmButtons.length];
+    next.focus();
+    next.click();
+  });
+});
+
 function onPaymentMethodChange() {
-  const select = document.getElementById('payment-method-select');
-  const refGroup = document.getElementById('reference-number-group');
-  const cashCard = document.getElementById('cash-tendered-card');
-
-  const isEwallet = EWALLET_METHODS.includes(select.value);
-  refGroup.style.display = isEwallet ? 'block' : 'none';
-
-  if (cashCard) {
-    cashCard.style.display = select.value === 'cash' ? 'block' : 'none';
-  }
-
-  if (select.value !== 'cash') {
+  const value = document.getElementById('payment-method-select').value;
+  pmButtons.forEach(b => {
+    const on = b.dataset.pm === value;
+    b.setAttribute('aria-checked', String(on));
+    b.tabIndex = on ? 0 : -1;
+  });
+  document.getElementById('reference-number-group').hidden = !EWALLET_METHODS.includes(value);
+  document.getElementById('cash-tendered-card').hidden = value !== 'cash';
+  if (value !== 'cash') {
     document.getElementById('cash-tendered').value = '';
-    calcChange();
+    clearQuick();
   }
+  calcChange();
 }
 
-// ── Complete sale ────────────────────────────────────────────────────────────
+// ── Clear / complete ────────────────────────────────────────────────────────
 function clearCart() {
   cart = {};
+  cartOrder = [];
   cartTotal = 0;
   document.getElementById('cash-tendered').value = '';
-  document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
-  calcChange();
+  clearQuick();
   renderCart();
+  scanInput.focus();
+}
+
+function buildItemFields() {
+  let html = '', i = 0;
+  Object.values(cart).forEach(item => {
+    html += '<input type="hidden" name="items-' + i + '-product" value="' + esc(item.id) + '">'
+          + '<input type="hidden" name="items-' + i + '-quantity" value="' + item.qty + '">'
+          + '<input type="hidden" name="items-' + i + '-unit_price" value="' + item.price + '">';
+    i++;
+  });
+  html += '<input type="hidden" name="items-TOTAL_FORMS" value="' + i + '">'
+        + '<input type="hidden" name="items-INITIAL_FORMS" value="0">'
+        + '<input type="hidden" name="items-MIN_NUM_FORMS" value="0">'
+        + '<input type="hidden" name="items-MAX_NUM_FORMS" value="1000">';
+  document.getElementById('form-items').innerHTML = html;
 }
 
 function completeSale() {
-  if (Object.keys(cart).length === 0) { showToast('Add at least one product.', '#e74c3c'); return; }
+  if (Object.keys(cart).length === 0) { showToast('Add at least one product first.', 'err'); return; }
 
-  const tendered = parseFloat(document.getElementById('cash-tendered').value) || 0;
   const paymentMethod = document.getElementById('payment-method-select').value;
+  // Blank cash on a cash sale means the customer paid the exact amount
+  const tendered = (parseFloat(document.getElementById('cash-tendered').value) || 0) || (paymentMethod === 'cash' ? cartTotal : 0);
   const referenceNumber = document.getElementById('reference-number-input').value.trim();
 
   if (paymentMethod === 'cash') {
-    if (tendered > 0 && tendered < cartTotal) {
-      showToast('⚠️ Cash tendered is less than total.', '#e74c3c');
-      return;
-    }
+    if (tendered > 0 && tendered < cartTotal) { showToast('Cash received is less than the total.', 'err'); return; }
   } else if (EWALLET_METHODS.includes(paymentMethod) && !referenceNumber) {
-    showToast('⚠️ Please enter a reference number.', '#e74c3c');
+    showToast('Enter the reference number to continue.', 'err');
+    document.getElementById('reference-number-input').focus();
     return;
   }
 
-  // Clear and rebuild form
-  document.getElementById('form-items').innerHTML = '';
   document.getElementById('form-customer').value = document.getElementById('customer-select').value;
   document.getElementById('form-status').value = 'completed';
   document.getElementById('form-cash-tendered').value = tendered.toFixed(2);
   document.getElementById('form-change-given').value = tendered > 0 ? (tendered - cartTotal).toFixed(2) : '0.00';
-  document.getElementById('form-payment-method').value = document.getElementById('payment-method-select').value;
-  document.getElementById('form-reference-number').value = document.getElementById('reference-number-input').value;
+  document.getElementById('form-payment-method').value = paymentMethod;
+  document.getElementById('form-reference-number').value = referenceNumber;
+  buildItemFields();
 
-  let html = '', i = 0;
-  Object.values(cart).forEach(item => {
-    html += `<input type="hidden" name="items-${i}-product" value="${item.id}">
-             <input type="hidden" name="items-${i}-quantity" value="${item.qty}">
-             <input type="hidden" name="items-${i}-unit_price" value="${item.price}">`;
-    i++;
-  });
-  html += `<input type="hidden" name="items-TOTAL_FORMS" value="${i}">
-           <input type="hidden" name="items-INITIAL_FORMS" value="0">
-           <input type="hidden" name="items-MIN_NUM_FORMS" value="0">
-           <input type="hidden" name="items-MAX_NUM_FORMS" value="1000">`;
-  document.getElementById('form-items').innerHTML = html;
+  const btn = document.getElementById('complete-btn');
+  btn.disabled = true;
+  btn.textContent = 'Completing…';
 
-  // ── FETCH instead of form.submit() ──
   const form = document.getElementById('sale-form');
-  const formData = new FormData(form);
-
   fetch(form.action, {
     method: 'POST',
-    body: formData,
+    body: new FormData(form),
     headers: { 'X-Requested-With': 'XMLHttpRequest' }
   })
   .then(r => r.json())
@@ -520,54 +752,56 @@ function completeSale() {
   .catch(() => { form.submit(); });
 }
 
-// ── Save as pending ──────────────────────────────────────────────────────────
 function saveAsPending() {
-  if (Object.keys(cart).length === 0) {
-    showToast('Add at least one product.', '#e74c3c');
-    return;
-  }
-
-  document.getElementById('form-items').innerHTML = '';
-
+  if (Object.keys(cart).length === 0) { showToast('Add at least one product first.', 'err'); return; }
   document.getElementById('form-customer').value = document.getElementById('customer-select').value;
   document.getElementById('form-status').value = 'pending';
   document.getElementById('form-cash-tendered').value = '';
   document.getElementById('form-change-given').value = '';
   document.getElementById('form-payment-method').value = document.getElementById('payment-method-select').value;
   document.getElementById('form-reference-number').value = document.getElementById('reference-number-input').value;
-
-  let html = '', i = 0;
-  Object.values(cart).forEach(item => {
-    html += `<input type="hidden" name="items-${i}-product" value="${item.id}">
-             <input type="hidden" name="items-${i}-quantity" value="${item.qty}">
-             <input type="hidden" name="items-${i}-unit_price" value="${item.price}">`;
-    i++;
-  });
-  html += `<input type="hidden" name="items-TOTAL_FORMS" value="${i}">
-           <input type="hidden" name="items-INITIAL_FORMS" value="0">
-           <input type="hidden" name="items-MIN_NUM_FORMS" value="0">
-           <input type="hidden" name="items-MAX_NUM_FORMS" value="1000">`;
-  document.getElementById('form-items').innerHTML = html;
-
+  buildItemFields();
   document.getElementById('sale-form').submit();
 }
 
-// ── Filter & init ────────────────────────────────────────────────────────────
-function filterProducts() {
-  const search = document.getElementById('search-input').value.toLowerCase();
-  const cat = document.getElementById('category-filter').value.toLowerCase();
-  document.querySelectorAll('.product-card').forEach(card => {
-    const match = card.dataset.name.toLowerCase().includes(search) &&
-                  (cat === '' || card.dataset.category.toLowerCase().includes(cat));
-    card.style.display = match ? '' : 'none';
+// ── Filter ──────────────────────────────────────────────────────────────────
+let activeCategory = '';
+
+function setCategory(btn) {
+  activeCategory = btn.dataset.cat.toLowerCase();
+  document.querySelectorAll('.chip').forEach(c => {
+    const on = c === btn;
+    c.classList.toggle('is-on', on);
+    c.setAttribute('aria-pressed', String(on));
   });
+  filterProducts();
 }
 
-document.querySelectorAll('.product-card').forEach(card => {
-  if (parseInt(card.dataset.stock) === 0) card.classList.add('out');
-});
+function filterProducts() {
+  const search = scanInput.value.trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll('.product-card').forEach(card => {
+    const match = (card.dataset.name.toLowerCase().includes(search) || card.dataset.barcode.toLowerCase().includes(search)) &&
+                  (activeCategory === '' || card.dataset.category.toLowerCase() === activeCategory);
+    card.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  document.getElementById('scan-clear').hidden = !search;
+  document.getElementById('grid-caption').textContent = search ? 'Matches for "' + scanInput.value.trim() + '"' : 'Best sellers';
+  document.getElementById('grid-count').textContent = shown + ' shown';
+  document.getElementById('no-match').hidden = shown > 0 || !document.querySelector('.product-card');
+}
 
-// ── Load pending sale if resuming ─────────────────────────────────────────────
+// Hide the phone total bar while the receipt itself is on screen
+if ('IntersectionObserver' in window) {
+  new IntersectionObserver(entries => {
+    document.getElementById('mobile-bar').classList.toggle('is-hidden', entries[0].isIntersecting);
+  }, { threshold: 0 }).observe(document.querySelector('.cart-total'));
+}
+
+renderCart();
+
+// ── Load pending sale if resuming ───────────────────────────────────────────
 {% if pending_sale %}
 (function() {
   {% for item in pending_sale.items.all %}
@@ -580,168 +814,100 @@ document.querySelectorAll('.product-card').forEach(card => {
   };
   {% endfor %}
   renderCart();
-  showToast('✓ Loaded pending sale #{{ pending_sale.pk }}', '#3b82f6');
+  showToast('Loaded held sale No. {{ pending_sale.pk }}', 'info');
 
   {% if pending_sale.payment_method %}
-  const pmSelect = document.getElementById('payment-method-select');
-  if (pmSelect) {
-      pmSelect.value = "{{ pending_sale.payment_method }}";
-      onPaymentMethodChange();
-  }
+  document.getElementById('payment-method-select').value = "{{ pending_sale.payment_method|escapejs }}";
+  onPaymentMethodChange();
   {% endif %}
   {% if pending_sale.reference_number %}
-  const refInput = document.getElementById('reference-number-input');
-  if (refInput) refInput.value = "{{ pending_sale.reference_number|escapejs }}";
+  document.getElementById('reference-number-input').value = "{{ pending_sale.reference_number|escapejs }}";
   {% endif %}
 })();
 {% endif %}
 
- // ── Restore cart on stock error ──────────────────────────────────────────────
+// ── Restore cart after a stock error ────────────────────────────────────────
 {% if preserved_cart %}
 (function() {
-    const preserved = {{ preserved_cart|safe }};
-    const customerSelect = document.getElementById('customer-select');
-    const cashInput = document.getElementById('cash-tendered');
+  const preserved = {{ preserved_cart|safe }};
+  cartOrder = [];
 
-    // Restore customer
-    {% if preserved_customer %}
-    if (customerSelect) customerSelect.value = "{{ preserved_customer }}";
-    {% endif %}
+  {% if preserved_customer %}
+  document.getElementById('customer-select').value = "{{ preserved_customer|escapejs }}";
+  {% endif %}
+  {% if preserved_payment_method %}
+  document.getElementById('payment-method-select').value = "{{ preserved_payment_method|escapejs }}";
+  onPaymentMethodChange();
+  {% endif %}
+  {% if preserved_cash_tendered %}
+  document.getElementById('cash-tendered').value = "{{ preserved_cash_tendered|escapejs }}";
+  {% endif %}
+  {% if preserved_reference_number %}
+  document.getElementById('reference-number-input').value = "{{ preserved_reference_number|escapejs }}";
+  {% endif %}
 
-    // Restore cash tendered
-    {% if preserved_cash_tendered %}
-    if (cashInput) {
-        cashInput.value = "{{ preserved_cash_tendered }}";
-        calcChange();
-    }
-    {% endif %}
+  cart = {};
+  let errorCount = 0;
+  preserved.forEach(item => {
+    const card = document.querySelector('.product-card[data-id="' + item.product_id + '"]');
+    const currentStock = card ? parseInt(card.dataset.stock) : item.stock;
+    cart[item.product_id] = {
+      id: String(item.product_id),
+      name: item.name,
+      price: item.unit_price,
+      qty: item.quantity,            // keep the original quantity so the cashier sees the problem
+      stock: currentStock,
+      hasError: item.has_error || false
+    };
+    cartOrder.push(String(item.product_id));
+    if (item.has_error) errorCount++;
+  });
+  renderCart();
 
-    // Restore payment method
-    {% if preserved_payment_method %}
-    (function() {
-        const pmSelect = document.getElementById('payment-method-select');
-        if (pmSelect) {
-            pmSelect.value = "{{ preserved_payment_method }}";
-            onPaymentMethodChange();
-        }
-    })();
-    {% endif %}
-
-    // Restore reference number
-    {% if preserved_reference_number %}
-    (function() {
-        const refInput = document.getElementById('reference-number-input');
-        if (refInput) refInput.value = "{{ preserved_reference_number }}";
-    })();
-    {% endif %}
-
-    // Clear existing cart and rebuild from preserved data
-    cart = {};
-    let errorCount = 0;
-
-    preserved.forEach(item => {
-        const card = document.querySelector(`.product-card[data-id="${item.product_id}"]`);
-        const currentStock = card ? parseInt(card.dataset.stock) : item.stock;
-
-        // Use original quantity (don't auto-adjust — let cashier see the error)
-        const qty = item.quantity;
-
-        cart[item.product_id] = {
-            id: item.product_id,
-            name: item.name,
-            price: item.unit_price,
-            qty: qty,
-            stock: currentStock,
-            hasError: item.has_error || false  // Preserve error flag
-        };
-
-        if (item.has_error) {
-            errorCount++;
-        }
-    });
-
-    renderCart();
-
-    // Add visual error indicators to cart rows
-    setTimeout(() => {
-        Object.keys(cart).forEach(id => {
-            const item = cart[id];
-            if (item.hasError) {
-                // Find the cart row and add error styling
-                const rows = document.querySelectorAll('.cart-row');
-                rows.forEach(row => {
-                    if (row.textContent.includes(item.name)) {
-                        row.style.background = 'rgba(239, 68, 68, 0.08)';
-                        row.style.borderRadius = '6px';
-                        row.style.padding = '8px';
-
-                        // Add error badge if not exists
-                        if (!row.querySelector('.stock-error-badge')) {
-                            const badge = document.createElement('div');
-                            badge.className = 'stock-error-badge';
-                            badge.style.cssText = 'font-size:11px; color:#f87171; margin-top:4px;';
-                            row.appendChild(badge);
-                        }
-                    }
-                });
-            }
-        });
-    }, 50);
-
-    if (errorCount > 0) {
-        showToast(`⚠️ ${errorCount} item(s) out of stock. Adjust quantities to proceed.`, '#e67e22');
-    }
-
-    // Focus barcode for quick adjustment
-    document.getElementById('barcode-manual').focus();
+  if (errorCount > 0) {
+    showToast(errorCount + ' item(s) exceed stock. Adjust quantities to continue.', 'warn');
+  }
+  scanInput.focus();
 })();
 {% endif %}
 </script>
 
+{% endblock content %}
 
-<!-- ── Receipt Modal ── -->
-<div id="receiptModal" style="z-index:9999; display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
-  <div style="width:400px; background:#1e2d3d; border:0.5px solid rgba(255,255,255,0.12); border-radius:12px; overflow:hidden;">
-    <!-- Header -->
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#162030; border-bottom:0.5px solid rgba(255,255,255,0.1);">
-      <span style="font-weight:500; font-size:14px; color:#e2e8f0; display:flex; align-items:center; gap:8px;">
-        <i class="bi bi-receipt" style="color:#4ade80;"></i> Receipt
-      </span>
-      <div style="display:flex; gap:8px;">
-        <button onclick="printReceipt()"
-                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
-                       border:0.5px solid rgba(74,222,128,0.35); background:rgba(74,222,128,0.1);
-                       color:#4ade80; font-size:12px; font-weight:500; cursor:pointer;">
-          <i class="bi bi-printer"></i> Print
-        </button>
-        <button onclick="closeReceiptModal()"
-                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
-                       border:0.5px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05);
-                       color:#94a3b8; font-size:12px; font-weight:500; cursor:pointer;">
-          <i class="bi bi-x"></i> Close
-        </button>
+{% block modals %}
+<div id="receiptModal" class="receipt-modal" role="dialog" aria-modal="true" aria-labelledby="receipt-title" hidden>
+  <div class="receipt-box">
+    <div class="receipt-head">
+      <span id="receipt-title"><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Sale completed</span>
+      <div class="receipt-actions">
+        <button type="button" class="btn btn-primary btn-sm" onclick="printReceipt()"><i class="bi bi-printer" aria-hidden="true"></i> Print</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeReceiptModal()">New sale</button>
       </div>
     </div>
-    <!-- Receipt iframe -->
-    <iframe id="receiptFrame"
-            style="width:100%; height:520px; border:none; display:block; background:#fff;"
-            src=""></iframe>
+    <iframe id="receiptFrame" title="Receipt" src=""></iframe>
   </div>
 </div>
 
+<style>
+.receipt-modal { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(30,36,48,.45); }
+.receipt-modal[hidden] { display: none; }
+.receipt-box { width: 420px; max-width: 100%; background: var(--panel); border-radius: 10px; overflow: hidden; box-shadow: 0 16px 40px rgba(30,36,48,.25); }
+.receipt-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px 12px 18px; border-bottom: 1px solid var(--rule); }
+.receipt-head span { font-weight: 700; display: inline-flex; align-items: center; gap: 8px; }
+.receipt-head .bi-check-circle-fill { color: var(--green); }
+.receipt-actions { display: flex; gap: 8px; }
+#receiptFrame { width: 100%; height: min(560px, 70vh); border: 0; display: block; background: #fff; }
+</style>
+
 <script>
 function openReceiptModal(saleId) {
-  const modal = document.getElementById('receiptModal');
-  const frame = document.getElementById('receiptFrame');
-  frame.src = '/receipt/' + saleId + '/';
-  modal.style.cssText = modal.style.cssText.replace('display:none','display:flex');
-  modal.style.display = 'flex';
-  modal.style.alignItems = 'center';
-  modal.style.justifyContent = 'center';
+  document.getElementById('receiptFrame').src = '/receipt/' + saleId + '/';
+  document.getElementById('receiptModal').hidden = false;
+  document.querySelector('#receiptModal .btn-primary').focus();
 }
 
 function closeReceiptModal() {
-  document.getElementById('receiptModal').style.display = 'none';
+  document.getElementById('receiptModal').hidden = true;
   document.getElementById('receiptFrame').src = '';
   cart = {};
   cartTotal = 0;
@@ -755,11 +921,13 @@ function printReceipt() {
 document.getElementById('receiptModal').addEventListener('click', function(e) {
   if (e.target === this) closeReceiptModal();
 });
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && !document.getElementById('receiptModal').hidden) closeReceiptModal();
+});
 
-// ── Show toast if redirected after completed sale ─────────────────────────
 if (new URLSearchParams(window.location.search).get('completed') === '1') {
-  showToast('✅ Sale completed successfully!', '#1D9E75');
+  showToast('Sale completed', 'ok');
   history.replaceState(null, '', window.location.pathname);
 }
 </script>
-{% endblock %}
+{% endblock modals %}

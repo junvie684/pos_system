@@ -1,15 +1,16 @@
 {% extends 'base.html' %}
+{% block title %}Sign in — POS{% endblock %}
 {% block content %}
-<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; margin:-28px -32px;">
-  <div style="width:100%; max-width:380px; padding:20px;">
-    <div style="text-align:center; margin-bottom:32px;">
-      <div style="font-family:'Syne',sans-serif; font-size:32px; font-weight:700; color:#10b981; margin-bottom:6px;">&#9632; POS</div>
-      <div style="color:#475569; font-size:14px;">Sign in to your account</div>
+<div class="login-wrap">
+  <div class="login-box">
+    <div class="login-head">
+      <h1>Sign in</h1>
+      <p>Use the account your store manager gave you.</p>
     </div>
     <div class="card">
       {% if form.non_field_errors %}
       <div class="alert alert-error" style="margin-bottom:16px">
-        <i class="bi bi-x-circle"></i>
+        <i class="bi bi-x-circle" aria-hidden="true"></i>
         {{ form.non_field_errors|join:", " }}
       </div>
       {% endif %}
@@ -17,16 +18,23 @@
         {% csrf_token %}
         {% for field in form %}
         <div class="form-group">
-          <label class="form-label">{{ field.label }}</label>
-          <input class="form-control" type="{{ field.field.widget.input_type }}" name="{{ field.html_name }}" id="{{ field.id_for_label }}" {% if field.value %}value="{{ field.value }}"{% endif %} autocomplete="off">
-          {% if field.errors %}<div style="color:#f87171; font-size:12px; margin-top:4px;">{{ field.errors|join:", " }}</div>{% endif %}
+          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <input class="form-control" type="{{ field.field.widget.input_type }}" name="{{ field.html_name }}" id="{{ field.id_for_label }}" {% if field.value %}value="{{ field.value }}"{% endif %} autocomplete="off" {% if forloop.first %}autofocus{% endif %}>
+          {% if field.errors %}<div class="field-err">{{ field.errors|join:", " }}</div>{% endif %}
         </div>
         {% endfor %}
-        <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center; padding:11px; font-size:14px; margin-top:6px;">
-          <i class="bi bi-arrow-right-circle"></i> Sign In
-        </button>
+        <button type="submit" class="btn btn-primary login-submit">Sign in</button>
       </form>
     </div>
   </div>
 </div>
+<style>
+.login-wrap { min-height: calc(100dvh - 48px); display: flex; align-items: center; justify-content: center; }
+.login-box { width: 100%; max-width: 380px; }
+.login-head { margin-bottom: 20px; }
+.login-head h1 { font-size: 28px; font-weight: 800; letter-spacing: -.3px; }
+.login-head p { color: var(--ink-2); margin-top: 4px; }
+.field-err { color: var(--red); font-size: 13px; font-weight: 600; margin-top: 6px; }
+.login-submit { width: 100%; min-height: 48px; font-size: 16px; margin-top: 4px; }
+</style>
 {% endblock %}

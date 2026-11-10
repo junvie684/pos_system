@@ -96,7 +96,9 @@
   {% endif %}
 </div>
 
+{% endblock content %}
 
+{% block modals %}
 <!-- ── Modal Backdrop ─────────────────────────────────────────────────────── -->
 <div id="modal-backdrop" onclick="closeModal()"
      style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55);
@@ -375,5 +377,4 @@
     return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   }
 </script>
-
-{% endblock %}
+{% endblock modals %}

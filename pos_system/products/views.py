@@ -1,3 +1,4 @@
+from django.db.models import Max
 from django.db.models import Q, Count
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
@@ -26,6 +27,22 @@ def product_list(request):
             Q(category__name__icontains=search)
         )
 
+    # Stock filter chips (low = 1-5 left, same threshold as the dashboard)
+    stock_filter = request.GET.get('stock', '')
+    low_count = products.filter(stock__gt=0, stock__lte=5).count()
+    out_count = products.filter(stock=0).count()
+    all_count = products.count()
+    if stock_filter == 'attention':
+        products = products.filter(stock__lte=5)
+    elif stock_filter == 'low':
+        products = products.filter(stock__gt=0, stock__lte=5)
+    elif stock_filter == 'out':
+        products = products.filter(stock=0)
+    else:
+        stock_filter = ''
+
+    max_stock = Product.objects.filter(is_active=True).aggregate(m=Max('stock'))['m'] or 1
+
     paginator = Paginator(products, 13)
     page_obj = paginator.get_page(request.GET.get('page'))
     categories = Category.objects.order_by('name')
@@ -36,6 +53,11 @@ def product_list(request):
         'search': search,
         'categories': categories,
         'show_inactive': show_inactive,
+        'stock_filter': stock_filter,
+        'low_count': low_count,
+        'out_count': out_count,
+        'all_count': all_count,
+        'max_stock': max_stock,
     })
 
 

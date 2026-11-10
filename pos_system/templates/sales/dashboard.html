@@ -1,278 +1,277 @@
 {% extends 'base.html' %}
+{% block title %}Dashboard — POS{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
+{% block topbar_actions %}
+<a href="{% url 'sales:create_sale' %}" class="btn btn-primary"><i class="bi bi-plus-lg" aria-hidden="true"></i> New sale</a>
+{% endblock %}
 
 {% block content %}
+<div class="dash">
 
-{# ── KPI Cards ──────────────────────────────────────────────────── #}
-<div class="stat-grid" style="margin-bottom:20px;">
-  <div class="stat-card">
-    <div class="stat-label">Today's Sale</div>
-    <div class="stat-value">₱{{ total_today|floatformat:2 }}</div>
-    <div class="stat-sub">{{ sales_count_today }} sale{{ sales_count_today|pluralize }} today</div>
-    <i class="bi bi-currency-dollar stat-icon"></i>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Transaction's Today</div>
-    <div class="stat-value">{{ sales_count_today }}</div>
-    <div class="stat-sub">completed transactions</div>
-    <i class="bi bi-receipt stat-icon"></i>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Avg. Sale Today</div>
-    <div class="stat-value">₱{{ avg_sale|floatformat:2 }}</div>
-    <div class="stat-sub">per transaction</div>
-    <i class="bi bi-graph-up stat-icon"></i>
-  </div>
-  <div class="stat-card {% if status_counts.pending > 0 %}{% else %}{% endif %}">
-    <div class="stat-label">Pending Sales</div>
-    <div class="stat-value">{{ status_counts.pending }}</div>
-    <div class="stat-sub">awaiting completion</div>
-    <i class="bi bi-clock-history stat-icon"></i>
-  </div>
-  <div class="stat-card {% if low_stock_count > 0 %}{% else %}{% endif %}">
-    <div class="stat-label">Low Stock Items</div>
-    <div class="stat-value">{{ low_stock_count }}</div>
-    <div class="stat-sub">product{{ low_stock_count|pluralize }} need restocking</div>
-    <i class="bi bi-exclamation-triangle stat-icon"></i>
-  </div>
-</div>
-
-{# ── Revenue Chart ──────────────────────────────────────────────── #}
-<div class="card" style="margin-bottom:20px;">
-  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
-    <div style="font-size:14px; font-weight:500;">Sale — last 7 days</div>
-    <div style="display:flex; gap:16px; font-size:12px; color:#94a3b8;">
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px;"></span>Sale (₱)</span>
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#3b82f6;margin-right:4px;"></span>Transactions</span>
-    </div>
-  </div>
-  <div style="position:relative; width:100%; height:220px;">
-    <canvas id="revenueChart"
-            role="img"
-            aria-label="Bar chart showing daily revenue and transaction count over the last 7 days.">
-      Daily sale and transactions for the last 7 days.
-    </canvas>
-  </div>
-</div>
-
-{# ── Middle Row: Top Products + Low Stock ───────────────────────── #}
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
-
-  {# Top Products by Revenue #}
-  <div class="card">
-    <div style="font-size:14px; font-weight:500; margin-bottom:16px;">Top products by sale</div>
-    <div style="position:relative; width:100%; height:220px;">
-      <canvas id="productsChart"
-              role="img"
-              aria-label="Horizontal bar chart of top 5 products sorted by total sale.">
-        Top products by sale.
-      </canvas>
-    </div>
-  </div>
-
-  {# Low Stock Alerts #}
-  <div class="card">
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
-      <div style="font-size:14px; font-weight:500;">Low stock alerts</div>
-      <a href="/products/" style="font-size:12px; color:#3b82f6; text-decoration:none;">
-        Manage <i class="bi bi-arrow-right"></i>
-      </a>
-    </div>
-    {% for product in low_stock %}
-    <div style="display:flex; align-items:center; justify-content:space-between;
-                padding:8px 0; border-bottom:0.5px solid rgba(255,255,255,0.06);">
-      <div>
-        <div style="font-size:13px; font-weight:500;">{{ product.name }}</div>
-        <div style="font-size:11px; color:#64748b; margin-top:1px;">₱{{ product.price }}</div>
-      </div>
-      {% if product.stock == 0 %}
-        <span class="badge badge-red">Out of stock</span>
-      {% elif product.stock <= 2 %}
-        <span class="badge badge-red">{{ product.stock }} left</span>
-      {% else %}
-        <span class="badge badge-amber">{{ product.stock }} left</span>
-      {% endif %}
-    </div>
-    {% empty %}
-    <div style="text-align:center; padding:32px 0; color:#475569; font-size:13px;">
-      <i class="bi bi-check-circle" style="font-size:24px; display:block; margin-bottom:8px; color:#1D9E75;"></i>
-      All products sufficiently stocked
-    </div>
-    {% endfor %}
-  </div>
-
-</div>
-
-{# ── Bottom Row: Cashier Performance + Status + Units Sold ─────── #}
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
-
-  {# Cashier Performance #}
-  <div class="card">
-    <div style="font-size:14px; font-weight:500; margin-bottom:16px;">Cashier performance</div>
-    {% for c in cashier_data %}
-    <div style="margin-bottom:14px;">
-      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px;">
-        <span style="font-weight:500;">{{ c.username }}</span>
-        <span style="color:#94a3b8;">₱{{ c.revenue|floatformat:0 }} &middot; {{ c.sales_count }} sales</span>
-      </div>
-      <div style="background:rgba(255,255,255,0.07); border-radius:4px; height:7px; overflow:hidden;">
-        <div style="height:100%; border-radius:4px; background:#1D9E75;
-                    width:{% widthratio c.revenue max_cashier_revenue 100 %}%;
-                    transition: width 0.6s ease;"></div>
-      </div>
-    </div>
-    {% empty %}
-    <div style="color:#475569; font-size:13px;">No cashier data yet.</div>
-    {% endfor %}
-
-    {# Sale Status Donut #}
-    <div style="border-top:0.5px solid rgba(255,255,255,0.06); padding-top:16px; margin-top:4px;">
-      <div style="font-size:13px; color:#94a3b8; margin-bottom:10px;">All-time sale status</div>
-      <div style="display:flex; gap:16px; font-size:12px; color:#94a3b8; margin-bottom:8px;">
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#1D9E75;margin-right:4px;"></span>Completed {{ status_counts.completed }}</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#ef4444;margin-right:4px;"></span>Refunded {{ status_counts.refunded }}</span>
-        {% if status_counts.pending %}
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#f59e0b;margin-right:4px;"></span>Pending {{ status_counts.pending }}</span>
+  {# ── Today vs the last 7 days ─────────────────────────────── #}
+  <section class="panel today" aria-labelledby="today-h">
+    <div class="today-figure">
+      <h2 id="today-h" class="panel-h">Sales today</h2>
+      <div class="hero fig">₱{{ total_today|floatformat:"2g" }}</div>
+      <p class="delta">
+        {% if today_delta_pct is None %}
+          <span class="muted">No sales yesterday to compare</span>
+        {% elif today_delta_pct >= 0 %}
+          <span class="up"><i class="bi bi-arrow-up-right" aria-hidden="true"></i> {{ today_delta_pct }}%</span> vs yesterday <span class="fig">₱{{ yesterday_total|floatformat:"2g" }}</span>
+        {% else %}
+          <span class="down"><i class="bi bi-arrow-down-right" aria-hidden="true"></i> {{ today_delta_abs }}%</span> vs yesterday <span class="fig">₱{{ yesterday_total|floatformat:"2g" }}</span>
         {% endif %}
-      </div>
-      <div style="position:relative; width:100%; height:130px;">
-        <canvas id="statusChart"
-                role="img"
-                aria-label="Donut chart showing completed, refunded and pending sale counts.">
-          Sale status breakdown.
-        </canvas>
-      </div>
+      </p>
+      <dl class="figs">
+        <div><dt>Transactions</dt><dd class="fig">{{ sales_count_today }}</dd></div>
+        <div><dt>Average sale</dt><dd class="fig">₱{{ avg_sale|floatformat:"2g" }}</dd></div>
+        <div><dt>Last 7 days</dt><dd class="fig">₱{{ week_total|floatformat:"0g" }}</dd></div>
+      </dl>
     </div>
+
+    <figure class="week" aria-labelledby="week-cap">
+      <figcaption id="week-cap" class="panel-sub">Sales per day, last 7 days</figcaption>
+      {% if not week_total %}<p class="week-empty">No completed sales in the last 7 days.</p>{% endif %}
+      <div class="cols{% if not week_total %} is-empty{% endif %}" role="list">
+        {% for d in days %}
+        <div class="col{% if d.is_today %} is-today{% endif %}" role="listitem" tabindex="0"
+             aria-label="{{ d.date }}: ₱{{ d.revenue|floatformat:'2g' }}, {{ d.txns }} sale{{ d.txns|pluralize }}">
+          <div class="col-plot">
+            {% if d.is_today or forloop.counter0 == 5 %}<span class="col-val fig">₱{{ d.revenue|floatformat:"0g" }}</span>{% endif %}
+            <span class="col-bar" style="height: {{ d.pct }}%"></span>
+          </div>
+          <span class="col-day">{% if d.is_today %}Today{% else %}{{ d.label }}{% endif %}</span>
+          <span class="col-txn fig">{{ d.txns }}</span>
+          <span class="tip" aria-hidden="true"><b>{{ d.date }}</b><span class="fig">₱{{ d.revenue|floatformat:"2g" }}</span><span>{{ d.txns }} sale{{ d.txns|pluralize }}</span></span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="cols-key"><span>Sales count per day shown under each day</span></div>
+    </figure>
+  </section>
+
+  {# ── Needs attention ──────────────────────────────────────── #}
+  <div class="attn">
+    <a class="attn-item" href="{% url 'sales:pending_sales' %}">
+      <i class="bi bi-pause-circle" aria-hidden="true"></i>
+      <span><b class="fig">{{ status_counts.pending }}</b> held sale{{ status_counts.pending|pluralize }}</span>
+      <i class="bi bi-chevron-right go" aria-hidden="true"></i>
+    </a>
+    <a class="attn-item{% if low_stock_count %} warn{% endif %}" href="{% url 'products:product_list' %}?stock=attention">
+      <i class="bi bi-box-seam" aria-hidden="true"></i>
+      <span><b class="fig">{{ low_stock_count }}</b> product{{ low_stock_count|pluralize }} low or out of stock</span>
+      <i class="bi bi-chevron-right go" aria-hidden="true"></i>
+    </a>
   </div>
 
-  {# Units Sold #}
-  <div class="card">
-    <div style="font-size:14px; font-weight:500; margin-bottom:16px;">Top products by units sold</div>
-    <div style="position:relative; width:100%; height:340px;">
-      <canvas id="unitsChart"
-              role="img"
-              aria-label="Horizontal bar chart of top 5 products sorted by units sold.">
-        Top products by units sold.
-      </canvas>
-    </div>
+  {# ── Products ─────────────────────────────────────────────── #}
+  <div class="grid-2">
+    <section class="panel" aria-labelledby="top-h">
+      <h2 id="top-h" class="panel-h">Top products by sales</h2>
+      <p class="panel-sub">All time, completed sales</p>
+      {% if top_products_rows %}
+      <ol class="hbars">
+        {% for r in top_products_rows %}
+        <li>
+          <span class="hb-name" title="{{ r.name }}">{{ r.name }}</span>
+          <span class="hb-track"><span class="hb-bar" style="width: {{ r.pct }}%"></span></span>
+          <span class="hb-val fig">₱{{ r.value|floatformat:"0g" }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="empty">No completed sales yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel" aria-labelledby="low-h">
+      <div class="panel-head">
+        <h2 id="low-h" class="panel-h">Low stock</h2>
+        <a href="{% url 'products:product_list' %}?stock=attention" class="panel-link">Manage <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+      </div>
+      <p class="panel-sub">5 or fewer left</p>
+      {% if low_stock %}
+      <ul class="stock-list">
+        {% for product in low_stock %}
+        <li>
+          <span class="sl-name">{{ product.name }}<span class="sl-price fig">₱{{ product.price }}</span></span>
+          {% if product.stock == 0 %}
+            <span class="badge badge-red">Out of stock</span>
+          {% else %}
+            <span class="badge badge-amber fig">{{ product.stock }} left</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% if low_stock_count > 8 %}<p class="more">and {{ low_stock_count|add:"-8" }} more</p>{% endif %}
+      {% else %}
+      <p class="empty ok"><i class="bi bi-check-circle" aria-hidden="true"></i> Everything is stocked.</p>
+      {% endif %}
+    </section>
   </div>
 
+  <div class="grid-2">
+    <section class="panel" aria-labelledby="units-h">
+      <h2 id="units-h" class="panel-h">Top products by units sold</h2>
+      <p class="panel-sub">All time, completed sales</p>
+      {% if top_units_rows %}
+      <ol class="hbars">
+        {% for r in top_units_rows %}
+        <li>
+          <span class="hb-name" title="{{ r.name }}">{{ r.name }}</span>
+          <span class="hb-track"><span class="hb-bar" style="width: {{ r.pct }}%"></span></span>
+          <span class="hb-val fig">{{ r.value }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="empty">No completed sales yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="panel" aria-labelledby="cash-h">
+      <h2 id="cash-h" class="panel-h">Sales by cashier</h2>
+      <p class="panel-sub">All time, completed sales</p>
+      {% if cashier_data %}
+      <ol class="hbars">
+        {% for c in cashier_data %}
+        <li>
+          <span class="hb-name">{{ c.username }}<span class="hb-sub"><span class="fig">{{ c.sales_count }}</span> sale{{ c.sales_count|pluralize }}</span></span>
+          <span class="hb-track"><span class="hb-bar" style="width: {% widthratio c.revenue max_cashier_revenue 100 %}%"></span></span>
+          <span class="hb-val fig">₱{{ c.revenue|floatformat:"0g" }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <p class="empty">No cashier sales yet.</p>
+      {% endif %}
+
+      <h3 class="panel-h sub-h">Sale status, all time</h3>
+      <div class="seg" role="img" aria-label="Completed {{ status_counts.completed }}, refunded {{ status_counts.refunded }}, held {{ status_counts.pending }}">
+        {% if status_counts.completed %}<span class="seg-c" style="flex-grow: {{ status_pct.completed }}"></span>{% endif %}
+        {% if status_counts.refunded %}<span class="seg-r" style="flex-grow: {{ status_pct.refunded }}"></span>{% endif %}
+        {% if status_counts.pending %}<span class="seg-p" style="flex-grow: {{ status_pct.pending }}"></span>{% endif %}
+      </div>
+      <ul class="seg-key">
+        <li><i class="k k-c"></i>Completed <b class="fig">{{ status_counts.completed }}</b></li>
+        <li><i class="k k-r"></i>Refunded <b class="fig">{{ status_counts.refunded }}</b> <span class="muted">({{ refund_rate }}%)</span></li>
+        <li><i class="k k-p"></i>Held <b class="fig">{{ status_counts.pending }}</b></li>
+      </ul>
+    </section>
+  </div>
 </div>
 
-{# ── Chart.js ───────────────────────────────────────────────────── #}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script>
-const gridColor  = 'rgba(255,255,255,0.06)';
-const labelColor = '#64748b';
+<style>
+.dash { display: flex; flex-direction: column; gap: 16px; max-width: 1400px; }
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 20px 24px; min-width: 0; }
+.panel-h { font-size: 16px; font-weight: 700; line-height: 1.3; }
+.panel-sub { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.panel-link { font-size: 14px; font-weight: 600; color: var(--carbon-ink); text-decoration: none; display: inline-flex; gap: 6px; align-items: center; min-height: 32px; }
+.panel-link:hover { text-decoration: underline; }
+.muted { color: var(--ink-3); }
+.empty { color: var(--ink-3); padding: 28px 0 12px; text-align: center; }
+.empty.ok .bi { color: var(--green); margin-right: 4px; }
 
-const chartDefaults = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: { legend: { display: false } },
-};
+/* Today */
+.today { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 32px; align-items: stretch; }
+.today-figure { display: flex; flex-direction: column; }
+.hero { font-size: 48px; font-weight: 700; letter-spacing: -1.5px; line-height: 1.05; margin-top: 10px; }
+.delta { margin-top: 8px; font-size: 14px; color: var(--ink-2); }
+.delta .up { color: var(--green); font-weight: 700; }
+.delta .down { color: var(--ink); font-weight: 700; }
+.figs { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: 0 28px; margin-top: auto; padding-top: 20px; border-top: 1px solid var(--rule); }
+.figs dt { font-size: 13px; color: var(--ink-3); font-weight: 600; }
+.figs dd { font-size: 18px; font-weight: 700; margin-top: 2px; }
 
-/* Revenue bar + line */
-new Chart(document.getElementById('revenueChart'), {
-  type: 'bar',
-  data: {
-    labels: {{ chart_days|safe }},
-    datasets: [
-      {
-        label: 'Sale (₱)',
-        data: {{ chart_revenue|safe }},
-        backgroundColor: '#1D9E75',
-        borderRadius: 4,
-        yAxisID: 'y',
-        order: 2,
-      },
-      {
-        label: 'Transactions',
-        data: {{ chart_txns|safe }},
-        type: 'line',
-        borderColor: '#3b82f6',
-        backgroundColor: 'transparent',
-        pointBackgroundColor: '#3b82f6',
-        pointRadius: 4,
-        pointBorderWidth: 0,
-        tension: 0.35,
-        yAxisID: 'y2',
-        order: 1,
-      }
-    ]
-  },
-  options: {
-    ...chartDefaults,
-    scales: {
-      x:  { ticks: { color: labelColor, font: { size: 11 } }, grid: { color: gridColor } },
-      y:  { ticks: { color: labelColor, font: { size: 11 }, callback: v => '₱' + v.toLocaleString() }, grid: { color: gridColor } },
-      y2: { position: 'right', ticks: { color: '#3b82f6', font: { size: 11 } }, grid: { display: false } },
-    }
-  }
-});
+.week { margin: 0; display: flex; flex-direction: column; min-width: 0; }
+.cols { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-top: 12px; min-height: 200px; }
+.col { position: relative; display: grid; grid-template-rows: 1fr auto auto; justify-items: center; outline-offset: 0; border-radius: 4px; }
+.col-plot { position: relative; width: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-bottom: 1px solid var(--rule-strong); padding-top: 22px; }
+.col-bar { display: block; width: min(24px, 60%); min-height: 2px; background: var(--rule-strong); border-radius: 4px 4px 0 0; transition: background-color .12s; }
+.col.is-today .col-bar { background: var(--ink); }
+.col-val { font-size: 12px; font-weight: 700; color: var(--ink-2); margin-bottom: 4px; white-space: nowrap; }
+.col.is-today .col-val { color: var(--ink); }
+.col-day { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+.col.is-today .col-day { font-weight: 700; color: var(--ink); }
+.col-txn { font-size: 12px; color: var(--ink-3); }
+.week { position: relative; }
+.week-empty { position: absolute; inset: 40px 0 72px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--ink-3); pointer-events: none; }
+.cols.is-empty .col-val { display: none; }
+.cols-key { font-size: 12px; color: var(--ink-3); margin-top: 6px; text-align: right; }
+.col:hover .col-bar, .col:focus-visible .col-bar { background: var(--ink-2); }
+.col.is-today:hover .col-bar { background: var(--ink-deep, #0F141C); }
+.tip {
+  position: absolute; bottom: calc(100% - 14px); left: 50%; transform: translate(-50%, 4px);
+  display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: 6px;
+  background: var(--ink); color: #fff; font-size: 12.5px; white-space: nowrap;
+  box-shadow: 0 8px 24px rgba(30,36,48,.25); opacity: 0; pointer-events: none; z-index: 5;
+  transition: opacity .12s, transform .16s var(--ease-out);
+}
+.tip b { font-weight: 700; }
+.tip .fig { font-size: 14px; font-weight: 700; }
+.col:hover .tip, .col:focus-visible .tip { opacity: 1; transform: translate(-50%, 0); }
 
-/* Top products — horizontal bar */
-new Chart(document.getElementById('productsChart'), {
-  type: 'bar',
-  data: {
-    labels: {{ top_product_labels|safe }},
-    datasets: [{
-      data: {{ top_product_values|safe }},
-      backgroundColor: ['#1D9E75','#1D9E75','#5DCAA5','#5DCAA5','#9FE1CB'],
-      borderRadius: 3,
-    }]
-  },
-  options: {
-    ...chartDefaults,
-    indexAxis: 'y',
-    scales: {
-      x: { ticks: { color: labelColor, font: { size: 11 }, callback: v => '₱' + (v >= 1000 ? (v/1000).toFixed(0)+'k' : v) }, grid: { color: gridColor } },
-      y: { ticks: { color: labelColor, font: { size: 11 } }, grid: { display: false } },
-    }
-  }
-});
+/* Attention strip */
+.attn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.attn-item { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 16px; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 15px; transition: border-color .12s; }
+.attn-item:hover { border-color: var(--ink); }
+.attn-item > .bi:first-child { font-size: 18px; color: var(--ink-2); }
+.attn-item b { font-size: 16px; }
+.attn-item.warn { background: var(--amber-tint); border-color: var(--amber-rule); }
+.attn-item.warn > .bi:first-child, .attn-item.warn b { color: var(--amber-ink); }
+.attn-item .go { margin-left: auto; color: var(--ink-3); }
 
-/* Status donut */
-new Chart(document.getElementById('statusChart'), {
-  type: 'doughnut',
-  data: {
-    labels: ['Completed', 'Refunded', 'Pending'],
-    datasets: [{
-      data: [
-        {{ status_counts.completed }},
-        {{ status_counts.refunded }},
-        {{ status_counts.pending }},
-      ],
-      backgroundColor: ['#1D9E75', '#ef4444', '#f59e0b'],
-      borderWidth: 0,
-      hoverOffset: 4,
-    }]
-  },
-  options: {
-    ...chartDefaults,
-    cutout: '68%',
-  }
-});
+/* Horizontal bars */
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.hbars { list-style: none; margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.hbars li { display: grid; grid-template-columns: minmax(110px, 42%) minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 28px; border-radius: 4px; }
+.hb-name { font-size: 14px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hb-name:has(.hb-sub) { display: block; -webkit-line-clamp: unset; }
+.hb-sub { display: block; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.hb-track { display: block; height: 14px; }
+.hb-bar { display: block; height: 100%; min-width: 2px; background: var(--ink); border-radius: 0 4px 4px 0; }
+.hbars li:hover .hb-bar { background: var(--ink-2); }
+.hb-val { font-size: 14px; font-weight: 700; min-width: 64px; text-align: right; }
 
-/* Units sold — horizontal bar */
-new Chart(document.getElementById('unitsChart'), {
-  type: 'bar',
-  data: {
-    labels: {{ top_units_labels|safe }},
-    datasets: [{
-      data: {{ top_units_values|safe }},
-      backgroundColor: '#3b82f6',
-      borderRadius: 3,
-    }]
-  },
-  options: {
-    ...chartDefaults,
-    indexAxis: 'y',
-    scales: {
-      x: { ticks: { color: labelColor, font: { size: 11 } }, grid: { color: gridColor } },
-      y: { ticks: { color: labelColor, font: { size: 11 } }, grid: { display: false } },
-    }
-  }
-});
-</script>
+/* Low stock list */
+.stock-list { list-style: none; margin-top: 12px; }
+.stock-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); }
+.stock-list li:last-child { border-bottom: 0; }
+.sl-name { font-size: 14px; font-weight: 600; min-width: 0; }
+.sl-price { display: block; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.more { font-size: 13px; color: var(--ink-3); margin-top: 6px; }
 
+/* Status segmented bar */
+.sub-h { font-size: 14px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--rule); }
+.seg { display: flex; gap: 2px; height: 12px; margin-top: 10px; }
+.seg span { min-width: 3px; }
+.seg span:first-child { border-radius: 4px 0 0 4px; }
+.seg span:last-child { border-radius: 0 4px 4px 0; }
+.seg span:only-child { border-radius: 4px; }
+.seg-c, .k-c { background: var(--green); }
+.seg-r, .k-r { background: var(--red); }
+.seg-p, .k-p { background: var(--amber-mark); }
+.seg-key { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 10px; font-size: 13.5px; color: var(--ink-2); }
+.seg-key li { display: inline-flex; align-items: center; gap: 6px; }
+.seg-key b { color: var(--ink); }
+.k { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+@media (max-width: 1100px) {
+  .today { grid-template-columns: 1fr; gap: 20px; }
+}
+@media (max-width: 860px) {
+  .grid-2, .attn { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .panel { padding: 16px; }
+  .hero { font-size: 40px; }
+  .figs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; }
+  .figs dd { font-size: 16px; }
+  .cols { min-height: 160px; }
+  .col-day { font-size: 12px; }
+  .hbars li { grid-template-columns: minmax(96px, 44%) minmax(0, 1fr) auto; gap: 8px; }
+  .hb-val { min-width: 0; }
+}
+</style>
 {% endblock %}

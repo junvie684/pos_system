@@ -1,269 +1,305 @@
 {% extends 'base.html' %}
+{% block title %}Sales History — POS{% endblock %}
 {% block page_title %}Sales History{% endblock %}
 {% block content %}
 
-<!-- Filters -->
-<div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-  <form method="get" style="display:flex; gap:10px; flex:1; flex-wrap:wrap;">
-    <input type="text" name="q" value="{{ query }}" placeholder="Search by #, customer, cashier..."
-           style="flex:1; min-width:200px; padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
-    <input type="date" name="date_from" value="{{ date_from }}"
-           style="padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
-    <input type="date" name="date_to" value="{{ date_to }}"
-           style="padding:8px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; background:var(--color-background-primary); color:var(--color-text-primary); font-size:14px;">
-    <button type="submit"
-            style="padding:8px 16px; background:#1D9E75; color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">
-      Filter
-    </button>
+<form method="get" class="filters" role="search" aria-label="Filter sales">
+  <div class="presets" role="group" aria-label="Date range">
+    <a href="?range=today{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'today' %} is-on{% endif %}"{% if preset == 'today' %} aria-current="true"{% endif %}>Today</a>
+    <a href="?range=yesterday{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'yesterday' %} is-on{% endif %}"{% if preset == 'yesterday' %} aria-current="true"{% endif %}>Yesterday</a>
+    <a href="?range=week{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'week' %} is-on{% endif %}"{% if preset == 'week' %} aria-current="true"{% endif %}>This week</a>
+    <a href="?range=month{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'month' %} is-on{% endif %}"{% if preset == 'month' %} aria-current="true"{% endif %}>This month</a>
+  </div>
+  <div class="filter-row">
+    <div class="search">
+      <i class="bi bi-search" aria-hidden="true"></i>
+      <label for="q" class="sr-only">Search sales</label>
+      <input type="text" id="q" name="q" value="{{ query }}" placeholder="Sale number, customer or cashier" class="form-control">
+    </div>
+    <label class="date"><span>From</span><input type="date" name="date_from" value="{{ date_from }}" class="form-control"></label>
+    <label class="date"><span>To</span><input type="date" name="date_to" value="{{ date_to }}" class="form-control"></label>
+    <button type="submit" class="btn btn-primary">Apply</button>
     {% if query or date_from or date_to %}
-    <a href="{% url 'sales:sale_history' %}"
-       style="padding:8px 16px; border:0.5px solid var(--color-border-secondary); border-radius:8px; font-size:14px; color:var(--color-text-secondary); text-decoration:none;">
-      Clear
-    </a>
+    <a href="{% url 'sales:sale_history' %}" class="btn btn-ghost">Clear</a>
     {% endif %}
-  </form>
+  </div>
+</form>
+
+<div class="summary" aria-live="polite">
+  <div><span class="s-label">Completed sales</span><span class="s-val fig">{{ filtered_count }}</span></div>
+  <div class="s-total"><span class="s-label">Completed total</span><span class="s-val fig">₱{{ filtered_total|floatformat:"2g" }}</span></div>
+  <div><span class="s-label">Refunded</span><span class="s-val fig">{{ refunded_count }}</span></div>
+  <p class="s-scope">{{ scope_label }}{% if query %} · matching “{{ query }}”{% endif %}</p>
 </div>
 
-<div class="card">
+<div class="card table-card">
   <div class="table-wrap">
-    <table>
+    <table class="sales-table">
       <thead>
-        <tr><th>#</th><th>Customer</th><th>Cashier</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr>
+        <tr><th scope="col">Sale</th><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Cashier</th><th scope="col">Items</th><th scope="col" class="num">Total</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
       </thead>
       <tbody>
         {% for sale in sales %}
         <tr>
-          <td class="strong">#{{ sale.pk }}</td>
+          <td class="serial-cell fig">#{{ sale.pk }}</td>
+          <td class="date-cell"><span>{{ sale.created_at|date:"M d, Y" }}</span><span class="fig sub">{{ sale.created_at|date:"H:i" }}</span></td>
           <td>{{ sale.customer|default:"Walk-in" }}</td>
           <td>{{ sale.cashier }}</td>
-          <td style="font-size:12px; color:var(--color-text-secondary);">
-            {% for item in sale.items.all %}
-              {{ item.product.name }} x{{ item.quantity }}{% if not forloop.last %}, {% endif %}
-            {% endfor %}
+          <td class="items-cell">
+            {% for item in sale.items.all %}<span>{{ item.product.name }} <span class="fig qty">×{{ item.quantity }}</span></span>{% if not forloop.last %}, {% endif %}{% endfor %}
           </td>
-          <td class="strong">₱{{ sale.total }}</td>
+          <td class="strong fig num">₱{{ sale.total|floatformat:"2g" }}</td>
           <td>
-            <span class="badge badge-{% if sale.status == 'completed' %}green{% elif sale.status == 'refunded' %}red{% else %}amber{% endif %}">
-              {{ sale.status }}
-            </span>
+            {% if sale.status == 'completed' %}<span class="badge badge-green">Completed</span>
+            {% elif sale.status == 'refunded' %}<span class="badge badge-red">Refunded</span>
+            {% else %}<span class="badge badge-amber">{{ sale.get_status_display }}</span>{% endif %}
           </td>
-          <td>{{ sale.created_at|date:"M d, Y H:i" }}</td>
-          <td style="display:flex; gap:8px; align-items:center;">
-            {% if sale.status == 'completed' %}
-              <button type="button" class="btn btn-danger btn-sm" onclick="openRefundModal({{ sale.pk }})">
-                <i class="bi bi-arrow-counterclockwise"></i> Refund
+          <td>
+            <div class="row-actions">
+              <button type="button" class="btn btn-ghost btn-sm icon-btn" onclick="openReceiptModal({{ sale.pk }})" aria-label="View receipt for sale {{ sale.pk }}" title="Receipt">
+                <i class="bi bi-receipt" aria-hidden="true"></i>
               </button>
-              <button type="button"
-                 onclick="openReceiptModal({{ sale.pk }})"
-                 style="display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:6px; border:0.5px solid var(--color-border-secondary); background:transparent; color:var(--color-text-secondary); cursor:pointer; transition:background .15s;"
-                 onmouseover="this.style.background='var(--color-background-secondary)'"
-                 onmouseout="this.style.background='transparent'"
-                 title="Print receipt">
-                <i class="bi bi-printer"></i>
-              </button>
-            {% else %}
-              <span style="font-size:12px; color:#f87171;">Refunded</span>
-            {% endif %}
+              {% if sale.status == 'completed' and user.is_staff or sale.status == 'completed' and user.is_superuser %}
+              <button type="button" class="btn btn-ghost btn-sm" onclick="openRefundModal({{ sale.pk }})">Refund</button>
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% empty %}
-        <tr><td colspan="8" style="text-align:center; padding:32px; color:#475569;">No sales found.</td></tr>
+        <tr><td colspan="8" class="empty-cell">
+          <i class="bi bi-receipt" aria-hidden="true"></i>
+          {% if query or date_from or date_to %}No sales match these filters. Try a wider date range or clear the search.{% else %}No sales yet. Completed sales will show up here.{% endif %}
+        </td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+
+  {% if sales.has_other_pages %}
+  <nav class="pager" aria-label="Pages">
+    <span class="pager-info">Page <b class="fig">{{ sales.number }}</b> of <span class="fig">{{ sales.paginator.num_pages }}</span></span>
+    <div class="pager-links">
+      {% if sales.has_previous %}
+      <a class="btn btn-ghost btn-sm" href="?q={{ query|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if preset %}&range={{ preset }}{% endif %}&page={{ sales.previous_page_number }}"><i class="bi bi-chevron-left" aria-hidden="true"></i> Prev</a>
+      {% endif %}
+      {% for num in sales.paginator.page_range %}
+        {% if sales.number == num %}
+        <span class="pg is-on fig" aria-current="page">{{ num }}</span>
+        {% elif num >= sales.number|add:"-2" and num <= sales.number|add:"2" %}
+        <a class="pg fig" href="?q={{ query|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if preset %}&range={{ preset }}{% endif %}&page={{ num }}">{{ num }}</a>
+        {% endif %}
+      {% endfor %}
+      {% if sales.has_next %}
+      <a class="btn btn-ghost btn-sm" href="?q={{ query|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if preset %}&range={{ preset }}{% endif %}&page={{ sales.next_page_number }}">Next <i class="bi bi-chevron-right" aria-hidden="true"></i></a>
+      {% endif %}
+    </div>
+  </nav>
+  {% endif %}
 </div>
 
-<!-- Pagination -->
-{% if sales.has_other_pages %}
-<div style="display:flex; justify-content:center; align-items:center; gap:6px; margin-top:20px; font-size:14px;">
+<style>
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+.filters { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+.presets { display: flex; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.presets::-webkit-scrollbar { display: none; }
+.presets .chip { flex-shrink: 0; }
+.serial-cell { color: var(--red); font-weight: 700; letter-spacing: .5px; }
+.s-total .s-val { border-top: 2px solid var(--ink); padding-top: 2px; margin-top: 2px; }
+.chip { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border: 1px solid var(--chip-rule); border-radius: var(--radius); background: var(--panel); color: var(--ink); font-size: 14px; font-weight: 600; text-decoration: none; transition: background-color .12s, border-color .12s; }
+.chip:hover { background: var(--paper-2); border-color: var(--rule-strong); }
+.chip.is-on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.filter-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.search { position: relative; flex: 1 1 280px; }
+.search .bi { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
+.search .form-control { padding-left: 36px; }
+.date { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.date .form-control { width: 168px; }
 
-  {% if sales.has_previous %}
-  <a href="?q={{ query }}&date_from={{ date_from }}&date_to={{ date_to }}&page={{ sales.previous_page_number }}"
-     style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; color:var(--color-text-primary); text-decoration:none;">
-    ‹ Prev
-  </a>
-  {% endif %}
+.summary { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 32px; padding: 14px 0 16px; margin-bottom: 4px; }
+.summary > div { display: flex; flex-direction: column; }
+.s-label { font-size: 13px; font-weight: 600; color: var(--ink-3); }
+.s-val { font-size: 22px; font-weight: 700; letter-spacing: -.5px; }
+.s-scope { margin-left: auto; font-size: 13.5px; color: var(--ink-2); }
 
-  {% for num in sales.paginator.page_range %}
-    {% if sales.number == num %}
-    <span style="padding:6px 12px; background:#1D9E75; color:#fff; border-radius:8px;">{{ num }}</span>
-    {% elif num >= sales.number|add:"-2" and num <= sales.number|add:"2" %}
-    <a href="?q={{ query }}&date_from={{ date_from }}&date_to={{ date_to }}&page={{ num }}"
-       style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; color:var(--color-text-primary); text-decoration:none;">
-      {{ num }}
-    </a>
-    {% endif %}
-  {% endfor %}
+.table-card { padding: 0; overflow: hidden; }
+.sales-table th:first-child, .sales-table td:first-child { padding-left: 20px; }
+.sales-table th:last-child, .sales-table td:last-child { padding-right: 20px; }
+.num { text-align: right; }
+.date-cell { white-space: nowrap; }
+.date-cell span { display: block; }
+.date-cell .sub { font-size: 12px; color: var(--ink-3); }
+.items-cell { font-size: 13.5px; color: var(--ink-2); max-width: 340px; }
+.items-cell .qty { font-size: 12px; color: var(--ink-3); }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.icon-btn { width: 36px; padding: 0; }
+.empty-cell { text-align: center; padding: 48px 16px !important; color: var(--ink-3); }
+.empty-cell .bi { display: block; font-size: 24px; color: var(--rule-strong); margin-bottom: 8px; }
 
-  {% if sales.has_next %}
-  <a href="?q={{ query }}&date_from={{ date_from }}&date_to={{ date_to }}&page={{ sales.next_page_number }}"
-     style="padding:6px 12px; border:0.5px solid var(--color-border-secondary); border-radius:8px; color:var(--color-text-primary); text-decoration:none;">
-    Next ›
-  </a>
-  {% endif %}
+.pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--rule); }
+.pager-info { font-size: 13.5px; color: var(--ink-2); }
+.pager-links { display: flex; gap: 4px; align-items: center; }
+.pg { min-width: 36px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); font-size: 13px; font-weight: 700; color: var(--ink); text-decoration: none; }
+.pg:hover { background: var(--paper-2); }
+.pg.is-on { background: var(--ink); color: #fff; }
 
-  <span style="color:var(--color-text-secondary); margin-left:8px;">
-    Page {{ sales.number }} of {{ sales.paginator.num_pages }}
-  </span>
-</div>
-{% endif %}
+/* Phones: rows become stacked records */
+@media (max-width: 760px) {
+  .s-scope { margin-left: 0; width: 100%; }
+  .date .form-control { width: 100%; }
+  .date { flex: 1 1 140px; }
+  .sales-table thead { display: none; }
+  .sales-table, .sales-table tbody, .sales-table tr, .sales-table td { display: block; width: 100%; }
+  .sales-table tr { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 12px 16px; }
+  .sales-table td { padding: 0 !important; border: 0; }
+  .sales-table td:nth-child(1) { grid-column: 1; }
+  .sales-table td:nth-child(6) { grid-column: 2; grid-row: 1; font-size: 16px; }
+  .sales-table td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .sales-table td:nth-child(2) .sub { display: inline; margin-left: 6px; }
+  .sales-table td:nth-child(2) span { display: inline; }
+  .sales-table td:nth-child(3), .sales-table td:nth-child(4) { grid-column: 1 / -1; font-size: 13.5px; color: var(--ink-2); }
+  .sales-table td:nth-child(3)::before { content: 'Customer: '; color: var(--ink-3); }
+  .sales-table td:nth-child(4)::before { content: 'Cashier: '; color: var(--ink-3); }
+  .sales-table td:nth-child(5) { grid-column: 1 / -1; max-width: none; margin-top: 4px; }
+  .sales-table td:nth-child(7) { grid-column: 1; margin-top: 8px; align-self: center; }
+  .sales-table td:nth-child(8) { grid-column: 2; grid-row: span 1; margin-top: 6px; }
+  .pager { justify-content: center; }
+}
+</style>
+{% endblock content %}
 
-<!-- Refund Modal -->
-<div id="refundModal" style="display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
-  <div style="background:var(--color-background-primary); border-radius:12px; max-width:520px; width:90%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-
-    <!-- Modal Header -->
-    <div style="padding:20px 24px 0;">
-      <div style="font-size:15px; font-weight:500; color:var(--color-text-primary); margin-bottom:4px;">
-        Refund Sale #<span id="modalSaleId"></span>
-      </div>
-      <div style="font-size:13px; color:var(--color-text-secondary);" id="modalSaleMeta">
-        <!-- filled by JS -->
-      </div>
+{% block modals %}
+<div class="modal-backdrop" id="refundModal" role="dialog" aria-modal="true" aria-labelledby="refund-title">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span id="refund-title">Refund sale <span class="fig">#<span id="modalSaleId"></span></span></span>
+      <button type="button" class="modal-close" onclick="closeRefundModal()" aria-label="Close"><i class="bi bi-x-lg"></i></button>
     </div>
-
-    <!-- Modal Body -->
-    <div style="padding:20px 24px;">
-      <div style="margin-bottom:20px;">
-        <div style="font-size:12px; color:var(--color-text-secondary); margin-bottom:8px;">Items to be restocked:</div>
-        <div id="modalItems">
-          <!-- filled by JS -->
-        </div>
-      </div>
-
-      <div style="display:flex; justify-content:space-between; font-size:15px; font-weight:500; color:var(--color-text-primary); margin-bottom:20px;">
-        <span>Total Refund</span>
-        <span>₱<span id="modalTotal"></span></span>
-      </div>
-
-      <div style="font-size:13px; color:#f87171; margin-bottom:4px;">
-        ⚠️ This will mark the sale as refunded and restore all item stock. This cannot be undone.
-      </div>
+    <div class="refund-body">
+      <p class="refund-meta" id="modalSaleMeta"></p>
+      <p class="refund-label">These items go back into stock</p>
+      <div id="modalItems" class="refund-items"></div>
+      <div class="refund-total"><span>Refund total</span><span class="fig">₱<span id="modalTotal"></span></span></div>
+      <p class="refund-warn"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> The sale will be marked refunded and its stock restored. This can't be undone.</p>
     </div>
-
-    <!-- Modal Footer -->
-    <div style="padding:0 24px 24px; display:flex; gap:10px;">
-      <form id="refundForm" method="post" style="display:flex; gap:10px; flex:1;">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-danger" style="flex:1;">
-          <i class="bi bi-arrow-counterclockwise"></i> Confirm Refund
-        </button>
-        <button type="button" class="btn btn-ghost" onclick="closeRefundModal()">Cancel</button>
-      </form>
-    </div>
-
+    <form id="refundForm" method="post" class="modal-footer">
+      {% csrf_token %}
+      <button type="button" class="btn btn-ghost" onclick="closeRefundModal()">Cancel</button>
+      <button type="submit" class="btn btn-danger refund-go"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Refund sale</button>
+    </form>
   </div>
 </div>
 
+<div class="modal-backdrop" id="receiptModal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
+  <div class="modal-box receipt-box">
+    <div class="modal-header">
+      <span id="receipt-title"><i class="bi bi-receipt" aria-hidden="true"></i> Receipt</span>
+      <div class="receipt-actions">
+        <button type="button" class="btn btn-primary btn-sm" onclick="printReceipt()"><i class="bi bi-printer" aria-hidden="true"></i> Print</button>
+        <button type="button" class="modal-close" onclick="closeReceiptModal()" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+      </div>
+    </div>
+    <iframe id="receiptFrame" title="Receipt" src=""></iframe>
+  </div>
+</div>
+
+<style>
+.refund-body { padding: 16px 20px 4px; }
+.refund-meta { font-size: 14px; color: var(--ink-2); }
+.refund-label { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-top: 14px; }
+.refund-items { margin-top: 6px; border-top: 1px solid var(--rule); }
+.refund-items div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--rule-strong); font-size: 14px; }
+.refund-items .fig { color: var(--ink-2); white-space: nowrap; }
+.refund-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 8px; border-top: 2px solid var(--ink); font-weight: 700; }
+.refund-total .fig { font-size: 22px; }
+.refund-warn { display: flex; gap: 8px; margin: 14px 0 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--red-tint); color: var(--red-ink-deep); font-size: 13.5px; font-weight: 600; }
+.modal-footer { justify-content: flex-end; }
+.receipt-box { max-width: 420px; overflow: hidden; }
+.receipt-actions { display: flex; gap: 6px; align-items: center; }
+#receiptFrame { width: 100%; height: min(560px, 70vh); border: 0; display: block; background: #fff; }
+</style>
+
 <script>
-// Sale data passed from Django
 const salesData = {
   {% for sale in sales %}
   {{ sale.pk }}: {
     date: "{{ sale.created_at|date:'M d, Y H:i' }}",
     cashier: "{{ sale.cashier|escapejs }}",
-    total: "{{ sale.total }}",
+    total: "{{ sale.total|floatformat:'2g'|escapejs }}",
     items: [
       {% for item in sale.items.all %}
-      { name: "{{ item.product.name|escapejs }}", qty: {{ item.quantity }}, subtotal: "{{ item.subtotal }}" }{% if not forloop.last %},{% endif %}
+      { name: "{{ item.product.name|escapejs }}", qty: {{ item.quantity }}, subtotal: "{{ item.subtotal|floatformat:'2g'|escapejs }}" }{% if not forloop.last %},{% endif %}
       {% endfor %}
     ]
   }{% if not forloop.last %},{% endif %}
   {% endfor %}
 };
+let lastFocus = null;
 
 function openRefundModal(saleId) {
   const sale = salesData[saleId];
   if (!sale) return;
-
+  lastFocus = document.activeElement;
   document.getElementById('modalSaleId').textContent = saleId;
   document.getElementById('modalSaleMeta').textContent = sale.date + ' · ' + sale.cashier;
   document.getElementById('modalTotal').textContent = sale.total;
-
-  // Build items list
-  const itemsContainer = document.getElementById('modalItems');
-  itemsContainer.innerHTML = '';
+  const box = document.getElementById('modalItems');
+  box.innerHTML = '';
   sale.items.forEach(item => {
-    const div = document.createElement('div');
-    div.style.cssText = 'display:flex; justify-content:space-between; padding:8px 0; border-bottom:0.5px solid var(--color-border-tertiary); font-size:13px;';
-    div.innerHTML = `
-      <span style="color:var(--color-text-primary);">${item.name}</span>
-      <span style="color:var(--color-text-secondary);">x${item.qty} · ₱${item.subtotal}</span>
-    `;
-    itemsContainer.appendChild(div);
+    const row = document.createElement('div');
+    const name = document.createElement('span');
+    name.textContent = item.name;
+    const fig = document.createElement('span');
+    fig.className = 'fig';
+    fig.textContent = '×' + item.qty + '  ₱' + item.subtotal;
+    row.append(name, fig);
+    box.appendChild(row);
   });
-
-  // Set form action
-  document.getElementById('refundForm').action = "{% url 'sales:refund_sale' 0 %}".replace('0', saleId);
-
-  // Show modal
-  const modal = document.getElementById('refundModal');
-  modal.style.display = 'flex';
+  document.getElementById('refundForm').action = "{% url 'sales:refund_sale' 0 %}".replace('/0/', '/' + saleId + '/');
+  document.getElementById('refundModal').classList.add('open');
   document.body.style.overflow = 'hidden';
+  document.querySelector('#refundModal .btn-ghost').focus();
 }
-
 function closeRefundModal() {
-  const modal = document.getElementById('refundModal');
-  modal.style.display = 'none';
+  document.getElementById('refundModal').classList.remove('open');
   document.body.style.overflow = '';
+  if (lastFocus) lastFocus.focus();
 }
-
-// Close on backdrop click
-document.getElementById('refundModal').addEventListener('click', function(e) {
-  if (e.target === this) closeRefundModal();
-});
-
-// Close on Escape key
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { closeRefundModal(); closeReceiptModal(); }
-});
-</script>
-
-<!-- Receipt Modal -->
-<div id="receiptModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; z-index:9999; background:rgba(0,0,0,0.6); align-items:center; justify-content:center;">
-  <div style="width:400px; background:#1e2d3d; border:0.5px solid rgba(255,255,255,0.12); border-radius:12px; overflow:hidden;">
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#162030; border-bottom:0.5px solid rgba(255,255,255,0.1);">
-      <span style="font-weight:500; font-size:14px; color:#e2e8f0; display:flex; align-items:center; gap:8px;">
-        <i class="bi bi-receipt" style="color:#4ade80;"></i> Receipt
-      </span>
-      <div style="display:flex; gap:8px;">
-        <button onclick="printReceipt()"
-                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
-                       border:0.5px solid rgba(74,222,128,0.35); background:rgba(74,222,128,0.1);
-                       color:#4ade80; font-size:12px; font-weight:500; cursor:pointer;">
-          <i class="bi bi-printer"></i> Print
-        </button>
-        <button onclick="closeReceiptModal()"
-                style="display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:6px;
-                       border:0.5px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05);
-                       color:#94a3b8; font-size:12px; font-weight:500; cursor:pointer;">
-          <i class="bi bi-x"></i> Close
-        </button>
-      </div>
-    </div>
-    <iframe id="receiptFrame" style="width:100%; height:520px; border:none; display:block; background:#fff;" src=""></iframe>
-  </div>
-</div>
-
-<script>
 function openReceiptModal(saleId) {
-  const modal = document.getElementById('receiptModal');
-  document.getElementById('receiptFrame').src = '/receipt/' + saleId + '/';
-  modal.style.display = 'flex';
-  modal.style.alignItems = 'center';
-  modal.style.justifyContent = 'center';
+  lastFocus = document.activeElement;
+  document.getElementById('receiptFrame').src = "{% url 'sales:receipt' 0 %}".replace('/0/', '/' + saleId + '/');
+  document.getElementById('receiptModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  document.querySelector('#receiptModal .btn-primary').focus();
 }
 function closeReceiptModal() {
-  document.getElementById('receiptModal').style.display = 'none';
+  document.getElementById('receiptModal').classList.remove('open');
   document.getElementById('receiptFrame').src = '';
+  document.body.style.overflow = '';
+  if (lastFocus) lastFocus.focus();
 }
 function printReceipt() {
   document.getElementById('receiptFrame').contentWindow.print();
 }
-document.getElementById('receiptModal').addEventListener('click', function(e) {
-  if (e.target === this) closeReceiptModal();
+['refundModal', 'receiptModal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', e => {
+    if (e.target.id === id) (id === 'refundModal' ? closeRefundModal : closeReceiptModal)();
+  });
+});
+// Keep Tab inside an open dialog
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const dlg = document.querySelector('.modal-backdrop.open');
+  if (!dlg) return;
+  const items = [...dlg.querySelectorAll('button, [href], input:not([type=hidden]), select, textarea, iframe, [tabindex]:not([tabindex="-1"])')].filter(el => !el.disabled && el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('refundModal').classList.contains('open')) closeRefundModal();
+  if (document.getElementById('receiptModal').classList.contains('open')) closeReceiptModal();
 });
 </script>
-
-{% endblock %}
+{% endblock modals %}
