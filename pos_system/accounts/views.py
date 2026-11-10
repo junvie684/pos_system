@@ -19,22 +19,20 @@ def login_view(request):
     form = AuthenticationForm(data=request.POST or None)
     if form.is_valid():
         user = form.get_user()
-        try:
-            profile = UserProfile.all_objects.get(user=user)
-            if profile.tenant_id:
-                try:
-                    tenant = Tenant.objects.get(id=profile.tenant_id)
-                    if not tenant.is_active:
-                        messages.error(request, 'This store has been deactivated. Please contact your administrator.')
-                        return render(request, 'accounts/login.html', {'form': form})
-                except Tenant.DoesNotExist:
-                    pass
+        profile = UserProfile.all_objects.filter(user=user).exclude(tenant_id__isnull=True).first()
+        tenant = Tenant.objects.filter(id=profile.tenant_id).first() if profile else None
 
-                login(request, user)
-                request.session['tenant_id'] = str(profile.tenant_id)
-        except UserProfile.DoesNotExist:
-            login(request, user)
+        # Every POS session must belong to exactly one existing store; otherwise
+        # tenant scoping has nothing to scope to.
+        if tenant is None:
+            messages.error(request, 'This account is not linked to a store. Please contact your administrator.')
+            return render(request, 'accounts/login.html', {'form': form})
+        if not tenant.is_active:
+            messages.error(request, 'This store has been deactivated. Please contact your administrator.')
+            return render(request, 'accounts/login.html', {'form': form})
 
+        login(request, user)
+        request.session['tenant_id'] = str(tenant.id)
         request.session['app_type'] = 'pos'
         return redirect('/')
 

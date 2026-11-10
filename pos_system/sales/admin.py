@@ -1,8 +1,9 @@
 from django.contrib import admin
+from tenants.admin_mixins import AllStoresAdminMixin
 from .models import Sale, SaleItem
 
 
-class SaleItemInline(admin.TabularInline):
+class SaleItemInline(AllStoresAdminMixin, admin.TabularInline):
     model  = SaleItem
     extra  = 0
     readonly_fields = ('product', 'quantity', 'unit_price', 'subtotal')
@@ -16,8 +17,8 @@ class SaleItemInline(admin.TabularInline):
 
 
 @admin.register(Sale)
-class SaleAdmin(admin.ModelAdmin):
-    list_display  = ('pk', 'get_store', 'cashier', 'customer', 'total', 'status', 'created_at')
+class SaleAdmin(AllStoresAdminMixin, admin.ModelAdmin):
+    list_display  = ('pk', 'get_store', 'cashier', 'customer', 'admin_total', 'status', 'created_at')
     list_filter   = ('status',)
     search_fields = ('cashier__username', 'customer__name')
     readonly_fields = ('tenant_id', 'created_at')
@@ -25,6 +26,11 @@ class SaleAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return Sale.all_objects.all()   # ← see ALL stores' sales
+
+    def admin_total(self, obj):
+        # Sale.total walks a store-scoped reverse manager, which is empty here.
+        return sum(i.subtotal for i in SaleItem.all_objects.filter(sale=obj))
+    admin_total.short_description = 'Total'
 
     def get_store(self, obj):
         try:

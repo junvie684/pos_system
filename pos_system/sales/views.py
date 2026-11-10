@@ -7,7 +7,7 @@ from customers.models import Customer
 from products.models import Product, Category
 from .models import Sale, SaleItem
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, DecimalField
 
 from django.db.models import Value, IntegerField, Q as DQ
 
@@ -20,7 +20,12 @@ from datetime import timedelta
 from tenants.models import Tenant
 from django.http import JsonResponse
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+import logging
+
+from django.urls import reverse
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Dashboard ───────────────────────────────────────────────
@@ -164,6 +169,40 @@ def dashboard(request):
     # ── Low stock count ───────────────────────────────────────────
     low_stock_count = low_stock.count()
 
+    # ── Server-rendered chart data (no JS chart library; works offline) ──
+    max_rev = max(chart_revenue) or 1
+    days = []
+    for i in range(7):
+        day = seven_days_ago + timedelta(days=i)
+        days.append({
+            'label':   day.strftime('%a'),
+            'date':    day.strftime('%b %d'),
+            'revenue': chart_revenue[i],
+            'txns':    chart_txns[i],
+            'pct':     round(chart_revenue[i] / max_rev * 100, 1),
+            'is_today': day == today,
+        })
+    yesterday_total = chart_revenue[5]
+    week_total = sum(chart_revenue)
+    week_txns = sum(chart_txns)
+    if yesterday_total:
+        today_delta_pct = round((float(total_today) - yesterday_total) / yesterday_total * 100)
+    else:
+        today_delta_pct = None
+
+    max_top = top_product_values[0] if top_product_values else 1
+    top_products_rows = [
+        {'name': n, 'value': v, 'pct': round(v / max_top * 100, 1)}
+        for n, v in zip(top_product_labels, top_product_values)
+    ]
+    max_units = top_units_values[0] if top_units_values else 1
+    top_units_rows = [
+        {'name': n, 'value': v, 'pct': round(v / max_units * 100, 1)}
+        for n, v in zip(top_units_labels, top_units_values)
+    ]
+    status_total = sum(status_counts.values()) or 1
+    status_pct = {k: round(v / status_total * 100, 1) for k, v in status_counts.items()}
+
     return render(request, 'sales/dashboard.html', {
         # Today
         'total_today':        total_today,
@@ -185,16 +224,48 @@ def dashboard(request):
         'top_units_labels':   json.dumps(top_units_labels),
         'top_units_values':   json.dumps(top_units_values),
 
+        # Server-rendered charts
+        'days':               days,
+        'yesterday_total':    yesterday_total,
+        'today_delta_pct':    today_delta_pct,
+        'today_delta_abs':    abs(today_delta_pct) if today_delta_pct is not None else None,
+        'week_total':         week_total,
+        'week_txns':          week_txns,
+        'top_products_rows':  top_products_rows,
+        'top_units_rows':     top_units_rows,
+        'status_pct':         status_pct,
+
         # Tables/lists
-        'low_stock':          low_stock,
+        'low_stock':          low_stock[:8],
         'cashier_data':       cashier_data,
         'max_cashier_revenue': max_cashier_revenue,
         'status_counts':      status_counts,
     })
 
-# ─── Create Sale (POS) ───────────────────────────────────────
-@pos_login_required
-def create_sale(request):
+def _cashier_today(user):
+    """Completed sales rung up by this cashier today: (count, total)."""
+    sales = Sale.objects.filter(cashier=user, status='completed', created_at__date=timezone.localdate())
+    count = sales.count()
+    total = SaleItem.objects.filter(sale__in=sales).aggregate(
+        t=Coalesce(Sum(F('quantity') * F('unit_price')), Value(Decimal('0')), output_field=DecimalField())
+    )['t']
+    return {'today_count': count, 'today_total': total}
+
+# ─── Checkout (shared by create_sale and resume_sale) ────────
+ALLOWED_SALE_STATUSES = ('completed', 'pending')
+PAYMENT_METHOD_CODES = {code for code, _ in Sale.PAYMENT_METHODS}
+# Mirrors EWALLET_METHODS in templates/sales/create_sale.html
+REFERENCE_REQUIRED_METHODS = {'gcash', 'maya', 'grabpay', 'bank_transfer'}
+MAX_AMOUNT = Decimal('99999999.99')  # DecimalField(max_digits=10, decimal_places=2)
+CENT = Decimal('0.01')
+PRESERVED_KEYS = ('cart', 'customer', 'cash_tendered', 'payment_method', 'reference_number')
+
+
+class CheckoutError(Exception):
+    """A checkout problem to show the cashier. The sale transaction is rolled back."""
+
+
+def _pos_screen_context():
     products = (
         Product.objects
         .filter(is_active=True)
@@ -207,180 +278,204 @@ def create_sale(request):
         )
         .order_by('-total_sold')[:24]
     )
-    customers = Customer.objects.all()
-    categories = Category.objects.all()
-
-    # ── Check for preserved cart from session (after redirect) ──
-    preserved_cart = request.session.pop('preserved_cart', None)
-    preserved_customer = request.session.pop('preserved_customer', None)
-    preserved_cash_tendered = request.session.pop('preserved_cash_tendered', None)
-    preserved_payment_method = request.session.pop('preserved_payment_method', None)
-    preserved_reference_number = request.session.pop('preserved_reference_number', None)
-
-    if request.method == 'POST':
-        customer_id = request.POST.get('customer') or None
-        status = request.POST.get('status', 'completed')
-        cash_tendered = request.POST.get('cash_tendered') or None
-        change_given = request.POST.get('change_given') or None
-        payment_method = request.POST.get('payment_method', 'cash')
-        reference_number = request.POST.get('reference_number') or None
-
-        customer = None
-        if customer_id:
-            try:
-                customer = Customer.objects.get(pk=customer_id)
-            except Customer.DoesNotExist:
-                pass
-
-        total_forms = int(request.POST.get('items-TOTAL_FORMS', 0))
-        if total_forms == 0:
-            messages.error(request, 'No valid items in the sale.')
-            return redirect('sales:create_sale')
-
-        # ── Build complete preserved cart from ALL POST items ──
-        preserved_cart_data = []
-        stock_errors = []
-
-        for i in range(total_forms):
-            product_id = request.POST.get(f'items-{i}-product')
-            quantity = request.POST.get(f'items-{i}-quantity')
-            unit_price = request.POST.get(f'items-{i}-unit_price')
-
-            if product_id and quantity and unit_price:
-                try:
-                    product = Product.objects.get(pk=product_id, is_active=True)
-                    qty = int(quantity)
-
-                    has_stock_error = False
-                    if status == 'completed' and product.stock < qty:
-                        stock_errors.append({
-                            'name': product.name,
-                            'requested': qty,
-                            'available': product.stock,
-                        })
-                        has_stock_error = True
-
-                    preserved_cart_data.append({
-                        'product_id': product_id,
-                        'name': product.name,
-                        'quantity': qty,
-                        'unit_price': float(unit_price),
-                        'stock': product.stock,
-                        'has_error': has_stock_error,
-                    })
-
-                except (Product.DoesNotExist, ValueError):
-                    pass
-
-        # ── If stock errors found, store in session and redirect ──
-        if stock_errors:
-            if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                for err in stock_errors:
-                    messages.error(
-                        request,
-                        f'"{err["name"]}" — requested {err["requested"]}, only {err["available"]} in stock. '
-                        f'Reduce quantity or remove from cart.'
-                    )
-
-            # Store cart data in session, then redirect to GET
-            request.session['preserved_cart'] = preserved_cart_data
-            request.session['preserved_customer'] = customer_id
-            request.session['preserved_cash_tendered'] = cash_tendered
-            request.session['preserved_payment_method'] = payment_method
-            request.session['preserved_reference_number'] = reference_number
-
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'reload': True})
-            return redirect('sales:create_sale')
-
-        # ── No stock errors — safe to create sale ──
-        try:
-            with transaction.atomic():
-                sale = Sale.objects.create(
-                    customer=customer,
-                    cashier=request.user,
-                    status=status,
-                    payment_method=payment_method,
-                    reference_number=reference_number if status == 'completed' else None,
-                    cash_tendered=cash_tendered if status == 'completed' else None,
-                    change_given=change_given if status == 'completed' else None,
-                )
-
-                has_items = False
-
-                for i in range(total_forms):
-                    product_id = request.POST.get(f'items-{i}-product')
-                    quantity = request.POST.get(f'items-{i}-quantity')
-                    unit_price = request.POST.get(f'items-{i}-unit_price')
-
-                    if not product_id or not quantity or not unit_price:
-                        continue
-
-                    try:
-                        quantity = int(quantity)
-                        if quantity <= 0:
-                            continue
-
-                        product = Product.objects.select_for_update().get(pk=product_id, is_active=True)
-                        unit_price = product.price
-
-                        if status == 'completed':
-                            Product.objects.filter(pk=product.pk).update(stock=F('stock') - quantity)
-
-                        SaleItem.objects.create(
-                            sale=sale,
-                            product=product,
-                            quantity=quantity,
-                            unit_price=unit_price,
-                        )
-                        has_items = True
-
-                    except Product.DoesNotExist:
-                        messages.error(request, f'Product no longer exists or is inactive.')
-                        raise
-                    except ValueError:
-                        continue
-
-                if not has_items:
-                    messages.error(request, 'No valid items in the sale.')
-                    raise ValueError('no items')
-
-        except Exception:
-            messages.error(request, 'Sale could not be completed. Please try again.')
-
-            # Store cart data in session and redirect
-            request.session['preserved_cart'] = preserved_cart_data
-            request.session['preserved_customer'] = customer_id
-            request.session['preserved_cash_tendered'] = cash_tendered
-            request.session['preserved_payment_method'] = payment_method
-            request.session['preserved_reference_number'] = reference_number
-
-            return redirect('sales:create_sale')
-
-        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-        if status == 'pending':
-            if not is_ajax:
-                messages.success(request, f'Sale #{sale.pk} saved as pending.')
-            if is_ajax:
-                return JsonResponse({'success': True, 'redirect': '/sales/pending/'})
-            return redirect('sales:pending_sales')
-        else:
-            if not is_ajax:
-                messages.success(request, f'Sale #{sale.pk} completed successfully.')
-            if is_ajax:
-                return JsonResponse({'success': True, 'sale_id': sale.pk})
-            return redirect('sales:receipt', sale_id=sale.pk)
-
-    # GET — render the POS (with optional preserved cart from session)
-    return render(request, 'sales/create_sale.html', {
+    return {
         'products': products,
-        'customers': customers,
-        'categories': categories,
-        'preserved_cart': json.dumps(preserved_cart) if preserved_cart else None,
-        'preserved_customer': preserved_customer,
-        'preserved_cash_tendered': preserved_cash_tendered,
-        'preserved_payment_method': preserved_payment_method,
-        'preserved_reference_number': preserved_reference_number,
+        'customers': Customer.objects.all(),
+        'categories': Category.objects.all(),
+    }
+
+
+def _pop_preserved(session):
+    """Cart + form values stashed by a failed checkout, consumed once."""
+    data = {k: session.pop(f'preserved_{k}', None) for k in PRESERVED_KEYS}
+    cart = data.pop('cart')
+    return {
+        'preserved_cart': json.dumps(cart) if cart else None,
+        **{f'preserved_{k}': v for k, v in data.items()},
+    }
+
+
+def _parse_lines(post):
+    """[(product_id, qty)] from the cart's items-N-* fields. Client prices are ignored."""
+    try:
+        total_forms = min(int(post.get('items-TOTAL_FORMS', 0)), 1000)
+    except ValueError:
+        return []
+    lines = []
+    for i in range(total_forms):
+        try:
+            product_id = int(post.get(f'items-{i}-product', ''))
+            qty = int(post.get(f'items-{i}-quantity', ''))
+        except ValueError:
+            continue
+        if qty > 0:
+            lines.append((product_id, qty))
+    return lines
+
+
+def _settle_payment(sale, status, method, tendered_raw, reference, total):
+    """Set cash/change/reference from server-side numbers only."""
+    if status != 'completed':
+        sale.cash_tendered = sale.change_given = sale.reference_number = None
+        return
+
+    if method == 'cash':
+        if not tendered_raw:
+            tendered = total  # blank = customer paid the exact amount
+        else:
+            try:
+                tendered = Decimal(tendered_raw).quantize(CENT)
+            except InvalidOperation:
+                raise CheckoutError('Enter a valid cash amount.')
+            if tendered > MAX_AMOUNT:
+                raise CheckoutError('Enter a valid cash amount.')
+        if tendered < total:
+            raise CheckoutError('Cash received is less than the total.')
+        sale.cash_tendered = tendered
+        sale.change_given = tendered - total
+        sale.reference_number = reference or None
+    else:
+        if method in REFERENCE_REQUIRED_METHODS and not reference:
+            raise CheckoutError('Enter the reference number to continue.')
+        sale.cash_tendered = None
+        sale.change_given = None
+        sale.reference_number = reference or None
+
+
+def _checkout(request, pending_sale=None):
+    """
+    Validate and record a sale (new, or completing/re-holding a pending one).
+    Prices, totals and change are always computed on the server.
+    """
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    retry_url = (reverse('sales:resume_sale', args=[pending_sale.pk]) if pending_sale
+                 else reverse('sales:create_sale'))
+
+    status = request.POST.get('status', 'completed')
+    payment_method = request.POST.get('payment_method', 'cash')
+    tendered_raw = (request.POST.get('cash_tendered') or '').strip()
+    reference = (request.POST.get('reference_number') or '').strip()[:100]
+    customer_id = request.POST.get('customer') or None
+    form_state = {
+        'customer': customer_id,
+        'cash_tendered': tendered_raw or None,
+        'payment_method': payment_method,
+        'reference_number': reference or None,
+    }
+
+    def fail(message, cart=()):
+        if message:
+            messages.error(request, message)
+        request.session['preserved_cart'] = list(cart)
+        for key, value in form_state.items():
+            request.session[f'preserved_{key}'] = value
+        if is_ajax:
+            return JsonResponse({'success': False, 'reload': True})
+        return redirect(retry_url)
+
+    if status not in ALLOWED_SALE_STATUSES or payment_method not in PAYMENT_METHOD_CODES:
+        return fail('Invalid sale request. Please try again.')
+
+    lines = _parse_lines(request.POST)
+    if not lines:
+        return fail('No valid items in the sale.')
+
+    customer = None
+    if customer_id and str(customer_id).isdigit():
+        customer = Customer.objects.filter(pk=customer_id).first()
+
+    # Pre-check stock so the cashier sees every shortfall at once.
+    # (Re-enforced under row locks + the stock >= 0 DB constraint below.)
+    products = Product.objects.filter(pk__in={pid for pid, _ in lines}, is_active=True).in_bulk()
+    cart, stock_errors = [], []
+    for pid, qty in lines:
+        product = products.get(pid)
+        if product is None:
+            continue
+        short = status == 'completed' and product.stock < qty
+        if short:
+            stock_errors.append((product.name, qty, product.stock))
+        cart.append({
+            'product_id': str(pid),
+            'name': product.name,
+            'quantity': qty,
+            'unit_price': float(product.price),  # display only
+            'stock': product.stock,
+            'has_error': short,
+        })
+
+    if stock_errors:
+        if not is_ajax:
+            for name, requested, available in stock_errors:
+                messages.error(
+                    request,
+                    f'"{name}" — requested {requested}, only {available} in stock. '
+                    f'Reduce quantity or remove from cart.'
+                )
+        return fail(None, cart)
+
+    try:
+        with transaction.atomic():
+            if pending_sale is None:
+                sale = Sale(cashier=request.user)
+            else:
+                # Lock the pending sale so two terminals can't complete it twice.
+                sale = Sale.objects.select_for_update().get(pk=pending_sale.pk, status='pending')
+                sale.items.all().delete()  # pending sales never deducted stock
+                if status == 'completed':
+                    sale.created_at = timezone.now()
+
+            sale.customer = customer
+            sale.status = status
+            sale.payment_method = payment_method
+            sale.save()
+
+            total = Decimal('0.00')
+            for pid, qty in lines:
+                try:
+                    product = Product.objects.select_for_update().get(pk=pid, is_active=True)
+                except Product.DoesNotExist:
+                    raise CheckoutError('A product in the sale no longer exists or is inactive.')
+                if status == 'completed':
+                    Product.objects.filter(pk=pid).update(stock=F('stock') - qty)
+                SaleItem.objects.create(sale=sale, product=product, quantity=qty, unit_price=product.price)
+                total += product.price * qty
+
+            _settle_payment(sale, status, payment_method, tendered_raw, reference, total)
+            sale.save()
+
+    except CheckoutError as exc:
+        return fail(str(exc), cart)
+    except Sale.DoesNotExist:
+        messages.error(request, f'Sale #{pending_sale.pk} is no longer pending.')
+        return redirect('sales:pending_sales')
+    except Exception:
+        logger.exception('Checkout failed (pending_sale=%s)', getattr(pending_sale, 'pk', None))
+        return fail('Sale could not be completed. Please try again.', cart)
+
+    if status == 'pending':
+        if is_ajax:
+            return JsonResponse({'success': True, 'redirect': reverse('sales:pending_sales')})
+        verb = 'updated and kept on hold' if pending_sale else 'saved as pending'
+        messages.success(request, f'Sale #{sale.pk} {verb}.')
+        return redirect('sales:pending_sales')
+
+    if is_ajax:
+        return JsonResponse({'success': True, 'sale_id': sale.pk})
+    messages.success(request, f'Sale #{sale.pk} completed successfully.')
+    return redirect('sales:receipt', sale_id=sale.pk)
+
+
+# ─── Create Sale (POS) ───────────────────────────────────────
+@pos_login_required
+def create_sale(request):
+    if request.method == 'POST':
+        return _checkout(request)
+
+    return render(request, 'sales/create_sale.html', {
+        **_pos_screen_context(),
+        **_pop_preserved(request.session),
+        **_cashier_today(request.user),
     })
 
 # ─── Pending Sales ─────────────────────────────────────────────
@@ -409,195 +504,14 @@ def resume_sale(request, pk):
         messages.error(request, 'Permission denied.')
         return redirect('sales:pending_sales')
 
-    products = (
-        Product.objects
-        .filter(is_active=True)
-        .select_related('category')
-        .annotate(
-            total_sold=Coalesce(
-                Sum('saleitem__quantity', filter=DQ(saleitem__sale__status='completed')),
-                Value(0), output_field=IntegerField()
-            )
-        )
-        .order_by('-total_sold')[:24]
-    )
-    customers = Customer.objects.all()
-    categories = Category.objects.all()
-
-    # ── Check for preserved cart from session (after redirect) ──
-    preserved_cart = request.session.pop('preserved_cart', None)
-    preserved_customer = request.session.pop('preserved_customer', None)
-    preserved_cash_tendered = request.session.pop('preserved_cash_tendered', None)
-    preserved_payment_method = request.session.pop('preserved_payment_method', None)
-    preserved_reference_number = request.session.pop('preserved_reference_number', None)
-
     if request.method == 'POST':
-        customer_id = request.POST.get('customer') or None
-        status = request.POST.get('status', 'completed')
-        cash_tendered = request.POST.get('cash_tendered') or None
-        change_given = request.POST.get('change_given') or None
-        payment_method = request.POST.get('payment_method', 'cash')
-        reference_number = request.POST.get('reference_number') or None
+        return _checkout(request, pending_sale=sale)
 
-        customer = None
-        if customer_id:
-            try:
-                customer = Customer.objects.get(pk=customer_id)
-            except Customer.DoesNotExist:
-                pass
-
-        total_forms = int(request.POST.get('items-TOTAL_FORMS', 0))
-        if total_forms == 0:
-            messages.error(request, 'No valid items in the sale.')
-            return redirect('sales:resume_sale', pk=pk)
-
-        # ── Build complete preserved cart from ALL POST items ──
-        preserved_cart_data = []
-        stock_errors = []
-
-        for i in range(total_forms):
-            product_id = request.POST.get(f'items-{i}-product')
-            quantity = request.POST.get(f'items-{i}-quantity')
-            unit_price = request.POST.get(f'items-{i}-unit_price')
-
-            if product_id and quantity and unit_price:
-                try:
-                    product = Product.objects.get(pk=product_id, is_active=True)
-                    qty = int(quantity)
-
-                    has_stock_error = False
-                    if status == 'completed' and product.stock < qty:
-                        stock_errors.append({
-                            'name': product.name,
-                            'requested': qty,
-                            'available': product.stock,
-                        })
-                        has_stock_error = True
-
-                    preserved_cart_data.append({
-                        'product_id': product_id,
-                        'name': product.name,
-                        'quantity': qty,
-                        'unit_price': float(unit_price),
-                        'stock': product.stock,
-                        'has_error': has_stock_error,
-                    })
-
-                except (Product.DoesNotExist, ValueError):
-                    pass
-
-        # ── If stock errors found, store in session and redirect ──
-        if stock_errors:
-            if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                for err in stock_errors:
-                    messages.error(
-                        request,
-                        f'"{err["name"]}" — requested {err["requested"]}, only {err["available"]} in stock. '
-                        f'Reduce quantity or remove from cart.'
-                    )
-
-            request.session['preserved_cart'] = preserved_cart_data
-            request.session['preserved_customer'] = customer_id
-            request.session['preserved_cash_tendered'] = cash_tendered
-            request.session['preserved_payment_method'] = payment_method
-            request.session['preserved_reference_number'] = reference_number
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return JsonResponse({'success': False, 'reload': True})
-            return redirect('sales:create_sale')
-
-        # ── No stock errors — safe to complete sale ──
-        try:
-            with transaction.atomic():
-                # Remove old items from this pending sale (no stock was deducted)
-                sale.items.all().delete()
-
-                # Update the existing sale record
-                sale.customer = customer
-                sale.status = status
-                sale.payment_method = payment_method
-                sale.reference_number = reference_number if status == 'completed' else None
-                sale.cash_tendered = cash_tendered if status == 'completed' else None
-                sale.change_given = change_given if status == 'completed' else None
-
-                # ── FIX: Update created_at to now when completing ──
-                if status == 'completed':
-                    sale.created_at = timezone.now()
-
-                sale.save()
-
-                has_items = False
-
-                for i in range(total_forms):
-                    product_id = request.POST.get(f'items-{i}-product')
-                    quantity = request.POST.get(f'items-{i}-quantity')
-                    unit_price = request.POST.get(f'items-{i}-unit_price')
-
-                    if not product_id or not quantity or not unit_price:
-                        continue
-
-                    try:
-                        quantity = int(quantity)
-                        if quantity <= 0:
-                            continue
-
-                        product = Product.objects.select_for_update().get(pk=product_id)
-
-                        if status == 'completed':
-                            Product.objects.filter(pk=product.pk).update(stock=F('stock') - quantity)
-
-                        SaleItem.objects.create(
-                            sale=sale,
-                            product=product,
-                            quantity=quantity,
-                            unit_price=unit_price,
-                        )
-                        has_items = True
-
-                    except Product.DoesNotExist:
-                        messages.error(request, 'A product in the sale no longer exists.')
-                        raise
-                    except ValueError:
-                        continue
-
-                if not has_items:
-                    messages.error(request, 'No valid items in the sale.')
-                    raise ValueError('no items')
-
-        except Exception:
-            messages.error(request, 'Sale could not be completed. Please try again.')
-
-            request.session['preserved_cart'] = preserved_cart_data
-            request.session['preserved_customer'] = customer_id
-            request.session['preserved_cash_tendered'] = cash_tendered
-            request.session['preserved_payment_method'] = payment_method
-            request.session['preserved_reference_number'] = reference_number
-
-            return redirect('sales:resume_sale', pk=pk)
-
-        if status == 'pending':
-            if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                messages.success(request, f'Sale #{sale.pk} updated and kept on hold.')
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return JsonResponse({'success': True, 'redirect': '/sales/pending/'})
-            return redirect('sales:pending_sales')
-        else:
-            if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                messages.success(request, f'Sale #{sale.pk} completed successfully.')
-            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-                return JsonResponse({'success': True, 'sale_id': sale.pk})
-            return redirect('sales:receipt', sale_id=sale.pk)
-
-    # GET — render the POS with pending sale + optional preserved cart from session
     return render(request, 'sales/create_sale.html', {
-        'products': products,
-        'customers': customers,
-        'categories': categories,
+        **_pos_screen_context(),
         'pending_sale': sale,
-        'preserved_cart': json.dumps(preserved_cart) if preserved_cart else None,
-        'preserved_customer': preserved_customer,
-        'preserved_cash_tendered': preserved_cash_tendered,
-        'preserved_payment_method': preserved_payment_method,
-        'preserved_reference_number': preserved_reference_number,
+        **_pop_preserved(request.session),
+        **_cashier_today(request.user),
     })
 
 
@@ -635,23 +549,67 @@ def sale_history(request):
             Q(status__icontains=query)
         )
 
-    # Date filter
+    # Date filter (shortcuts fill the range)
     date_from = request.GET.get('date_from', '')
     date_to   = request.GET.get('date_to', '')
+    preset    = request.GET.get('range', '')
+    today = timezone.localdate()
+    presets = {
+        'today':     (today, today),
+        'yesterday': (today - timedelta(days=1), today - timedelta(days=1)),
+        'week':      (today - timedelta(days=today.weekday()), today),
+        'month':     (today.replace(day=1), today),
+    }
+    if preset in presets:
+        start, end = presets[preset]
+        date_from, date_to = start.isoformat(), end.isoformat()
     if date_from:
         sales = sales.filter(created_at__date__gte=date_from)
     if date_to:
         sales = sales.filter(created_at__date__lte=date_to)
 
-    paginator = Paginator(sales, 12)
+    from datetime import date as _date
+    def _fmt(d):
+        try:
+            return _date.fromisoformat(d)
+        except (TypeError, ValueError):
+            return None
+    d_from, d_to = _fmt(date_from), _fmt(date_to)
+    preset_names = {'today': 'Today', 'yesterday': 'Yesterday', 'week': 'This week', 'month': 'This month'}
+    if d_from and d_to and d_from == d_to:
+        span = f"{d_from:%b} {d_from.day}, {d_from.year}"
+    elif d_from and d_to:
+        span = (f"{d_from:%b} {d_from.day} – {d_to.day}, {d_to.year}" if (d_from.year, d_from.month) == (d_to.year, d_to.month)
+                else f"{d_from:%b} {d_from.day}, {d_from.year} – {d_to:%b} {d_to.day}, {d_to.year}")
+    elif d_from:
+        span = f"From {d_from:%b} {d_from.day}, {d_from.year}"
+    elif d_to:
+        span = f"Until {d_to:%b} {d_to.day}, {d_to.year}"
+    else:
+        span = 'All dates'
+    scope_label = f"{preset_names[preset]} · {span}" if preset in preset_names else span
+
+    completed = sales.filter(status='completed')
+    filtered_total = SaleItem.objects.filter(sale__in=completed).aggregate(
+        t=Coalesce(Sum(F('quantity') * F('unit_price')), Value(Decimal('0')), output_field=DecimalField())
+    )['t']
+    filtered_count = completed.count()
+    refunded_count = sales.filter(status='refunded').count()
+
+    paginator = Paginator(sales.prefetch_related('items__product').select_related('customer', 'cashier'), 12)
     page      = request.GET.get('page')
     sales     = paginator.get_page(page)
 
     return render(request, 'sales/history.html', {
-        'sales':     sales,
-        'query':     query,
-        'date_from': date_from,
-        'date_to':   date_to,
+        'sales':          sales,
+        'query':          query,
+        'date_from':      date_from,
+        'date_to':        date_to,
+        'preset':         preset if preset in presets else '',
+        'filtered_total': filtered_total,
+        'filtered_count': filtered_count,
+        'refunded_count': refunded_count,
+        'scope_label':    scope_label,
     })
 
 # ─── Refund/Void ─────────────────────────────────────────────
@@ -660,25 +618,30 @@ def sale_history(request):
 def refund_sale(request, pk):
     sale = get_object_or_404(Sale, pk=pk)
 
-    if sale.status == 'refunded':
-        messages.error(request, f'Sale #{sale.pk} is already refunded.')
+    if sale.status != 'completed':
+        # Pending sales never deducted stock; refunded ones already restored it.
+        messages.error(request, f'Sale #{sale.pk} is {sale.get_status_display().lower()} and cannot be refunded.')
         return redirect('sales:sale_history')
 
     if request.method == 'POST':
         with transaction.atomic():
+            # Conditional update: only one request can flip completed -> refunded,
+            # so stock is restored exactly once even on double-clicks or races.
+            claimed = Sale.objects.filter(pk=sale.pk, status='completed').update(
+                status='refunded', refunded_by=request.user, refunded_at=timezone.now(),
+            )
+            if claimed:
+                for item in SaleItem.objects.filter(sale_id=sale.pk):
+                    Product.objects.filter(pk=item.product_id).update(stock=F('stock') + item.quantity)
 
-            for item in sale.items.select_related('product'):
-                Product.objects.filter(pk=item.product_id).update(
-                    stock=F('stock') + item.quantity
-                )
-
-            sale.status = 'refunded'
-            sale.save()
-
-        messages.success(request, f'Sale #{sale.pk} has been refunded and stock restored.')
+        if not claimed:
+            messages.error(request, f'Sale #{sale.pk} was already refunded.')
+        else:
+            messages.success(request, f'Sale #{sale.pk} has been refunded and stock restored.')
         return redirect('sales:sale_history')
 
     return render(request, 'sales/refund_confirm.html', {'sale': sale})
+
 
 # ─── Receipt ─────────────────────────────────────────────
 

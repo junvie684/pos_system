@@ -1,10 +1,11 @@
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from tenants.admin_mixins import AllStoresAdminMixin
 from .models import UserProfile
 
 
-class UserProfileInline(admin.StackedInline):
+class UserProfileInline(AllStoresAdminMixin, admin.StackedInline):
     model   = UserProfile
     extra   = 0
     readonly_fields = ('tenant_id',)

@@ -5,14 +5,31 @@ from django.core.exceptions import PermissionDenied
 from functools import wraps
 
 
+def is_platform_admin(user):
+    """
+    Platform (all-stores) administrator = an active superuser who is NOT linked
+    to any store. Store admins are also Django superusers (that is how the POS
+    marks the "Admin" role), so `is_superuser` alone must never grant
+    platform-wide access.
+    """
+    if not (user.is_authenticated and user.is_active and user.is_superuser):
+        return False
+    from accounts.models import UserProfile
+    return not UserProfile.all_objects.filter(user=user, tenant_id__isnull=False).exists()
+
+
+def _platform_session_ok(request):
+    return is_platform_admin(request.user) and not request.session.get('tenant_id')
+
+
 def platform_admin_required(view_func):
-    """Check if user is authenticated superuser without tenant session."""
+    """Allow only platform admins on a platform (non-store) session."""
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
         if not request.user.is_authenticated:
             return redirect('platform_admin:login')
 
-        if not request.user.is_superuser or request.session.get('tenant_id'):
+        if not _platform_session_ok(request):
             messages.error(request, 'Access denied.')
             return redirect('platform_admin:login')
 
@@ -31,7 +48,7 @@ def platform_permission_required(perm):
             if not request.user.is_authenticated:
                 return redirect('platform_admin:login')
 
-            if not request.user.is_superuser or request.session.get('tenant_id'):
+            if not _platform_session_ok(request):
                 messages.error(request, 'Access denied.')
                 return redirect('platform_admin:login')
 

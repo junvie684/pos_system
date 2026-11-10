@@ -1,9 +1,10 @@
 from django.contrib import admin
+from tenants.admin_mixins import AllStoresAdminMixin
 from .models import Product, Category
 
 
 @admin.register(Product)
-class ProductAdmin(admin.ModelAdmin):
+class ProductAdmin(AllStoresAdminMixin, admin.ModelAdmin):
     list_display  = ('name', 'get_store', 'category', 'price', 'stock', 'is_active')
     list_filter   = ('is_active', 'category')
     search_fields = ('name', 'barcode')
@@ -22,7 +23,7 @@ class ProductAdmin(admin.ModelAdmin):
 
 
 @admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
+class CategoryAdmin(AllStoresAdminMixin, admin.ModelAdmin):
     list_display  = ('name', 'get_store')
     readonly_fields = ('tenant_id',)
 

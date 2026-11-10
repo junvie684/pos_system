@@ -8,6 +8,7 @@ import jwt
 import datetime
 from django.conf import settings
 
+from .decorators import is_platform_admin
 from .forms import TenantRegistrationForm
 from .models import Tenant
 from accounts.models import UserProfile
@@ -141,7 +142,7 @@ def store_list(request):
     Superadmin only — list all registered stores.
     Protect this in production with IP allowlist or admin-only access.
     """
-    if not request.user.is_authenticated or not request.user.is_superuser:
+    if not is_platform_admin(request.user):
         return JsonResponse({'error': 'Forbidden'}, status=403)
 
     stores = Tenant.objects.all().order_by('name').values(

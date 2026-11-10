@@ -1,4 +1,6 @@
 import threading
+from contextlib import contextmanager
+
 import jwt
 from django.conf import settings
 from django.http import JsonResponse
@@ -10,6 +12,17 @@ _thread_locals = threading.local()
 
 def get_current_tenant_id():
     return getattr(_thread_locals, 'tenant_id', None)
+
+
+@contextmanager
+def tenant_context(tenant_id):
+    """Scope TenantManager queries to one store outside a request (scripts, tests)."""
+    previous = get_current_tenant_id()
+    _thread_locals.tenant_id = str(tenant_id) if tenant_id else None
+    try:
+        yield
+    finally:
+        _thread_locals.tenant_id = previous
 
 
 class TenantMiddleware:
@@ -45,5 +58,8 @@ class TenantMiddleware:
                 pass
 
         _thread_locals.tenant_id = tenant_id
-        response = self.get_response(request)
-        return response
+        try:
+            return self.get_response(request)
+        finally:
+            # Never let one request's store leak into whatever runs next on this thread.
+            _thread_locals.tenant_id = None

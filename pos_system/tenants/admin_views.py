@@ -8,7 +8,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.http import JsonResponse
 
-from .decorators import platform_admin_required, platform_permission_required
+from .decorators import is_platform_admin, platform_admin_required, platform_permission_required
 from .models import Tenant
 from accounts.models import UserProfile
 from sales.models import Sale
@@ -119,7 +119,7 @@ def create_store(request):
                 is_staff=True,
             )
 
-            UserProfile.objects.create(
+            UserProfile.all_objects.create(
                 user=owner,
                 tenant_id=tenant.id,
                 **_permissions_from_user(owner, is_owner=True),
@@ -140,7 +140,9 @@ def create_store(request):
 @platform_permission_required('tenants.view_tenant')
 def store_detail(request, tenant_id):
     tenant   = get_object_or_404(Tenant, id=tenant_id)
-    profiles = UserProfile.objects.filter(  # ← Use objects, not all_objects
+    # Platform sessions have no store in context, so the scoped manager returns
+    # nothing; filter explicitly by the store being viewed.
+    profiles = UserProfile.all_objects.filter(
         tenant_id=tenant.id
     ).select_related('user').order_by('user__username')
 
@@ -276,7 +278,7 @@ def add_store_user(request, tenant_id):
                 password=password,
                 is_staff=is_staff,
             )
-            profile = UserProfile.objects.create(
+            profile = UserProfile.all_objects.create(
                 user=user,
                 tenant_id=tenant.id,
                 **_permissions_from_user(user),
@@ -325,16 +327,16 @@ def remove_store_user(request, tenant_id, user_id):
 
 def platform_login(request):
     # ✅ Also check app_type so an admin session isn't mistaken for already-authed
-    if (request.user.is_authenticated
-            and request.user.is_superuser
+    if (is_platform_admin(request.user)
             and not request.session.get('tenant_id')
-            and request.session.get('app_type') == 'admin'):   # ← add this
+            and request.session.get('app_type') == 'admin'):
         return redirect('platform_admin:dashboard')
 
     form = AuthenticationForm(data=request.POST or None)
     if request.method == 'POST' and form.is_valid():
         user = form.get_user()
-        if not user.is_superuser:
+        # Store admins are superusers too; only store-less superusers may enter.
+        if not is_platform_admin(user):
             form.add_error(None, 'This account does not have platform admin access.')
             return render(request, 'platform_admin/login.html', {'form': form})
 

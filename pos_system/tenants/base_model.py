@@ -5,18 +5,23 @@ from .middleware import get_current_tenant_id
 import uuid
 
 class TenantManager(models.Manager):
+    """
+    Scopes every query to the current store. FAILS CLOSED: with no (valid) store
+    in context it returns no rows. Code that legitimately works across stores
+    (platform console, Django admin, scripts) must use `all_objects` explicitly.
+    """
     def get_queryset(self):
         qs = super().get_queryset()
         tenant_id = get_current_tenant_id()
 
         if not tenant_id:
-            return qs
+            return qs.none()
 
         # Guard against "None" string or invalid UUIDs
         try:
             uuid.UUID(str(tenant_id))
         except (ValueError, AttributeError):
-            return qs
+            return qs.none()
 
         return qs.filter(tenant_id=tenant_id)
 
