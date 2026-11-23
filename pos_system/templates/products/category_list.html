@@ -206,7 +206,7 @@ async function submitModal() {
         const count = parseInt(document.getElementById('badge-' + data.id).textContent) || 0;
         row.dataset.name = data.name;
         row.innerHTML = rowCells(data.id, data.name, count);
-        rxToast('Saved ' + data.name, 'success');
+        showToast('Saved ' + data.name, 'success');
       } else {
         document.getElementById('empty-row')?.remove();
         const tr = document.createElement('tr');
@@ -216,7 +216,7 @@ async function submitModal() {
         tr.innerHTML = rowCells(data.id, data.name, 0);
         document.getElementById('cat-tbody').insertBefore(tr, document.getElementById('no-results'));
         updateCount();
-        rxToast('Added ' + data.name, 'success');
+        showToast('Added ' + data.name, 'success');
       }
       filterTable();
     }
@@ -240,12 +240,12 @@ async function submitDelete() {
       closeModal();
       document.getElementById('row-' + _deleteId)?.remove();
       updateCount();
-      rxToast('Deleted ' + data.name, 'success');
+      showToast('Deleted ' + data.name, 'success');
     } else {
-      rxToast(data.error || 'Could not delete the category.', 'error');
+      showToast(data.error || 'Could not delete the category.', 'error');
     }
   } catch (e) {
-    rxToast('Something went wrong. Please try again.', 'error');
+    showToast('Something went wrong. Please try again.', 'error');
   }
   btn.disabled = false; btn.innerHTML = orig;
 }

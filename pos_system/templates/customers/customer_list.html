@@ -291,7 +291,7 @@ async function submitAdd() {
       document.getElementById('customer-tbody').insertBefore(tr, document.getElementById('no-results'));
       updateCount();
       filterTable();
-      rxToast('Added ' + c.name, 'success');
+      showToast('Added ' + c.name, 'success');
     } else {
       showModalAlert('add', formatErrors(data.errors));
     }
@@ -336,7 +336,7 @@ async function submitEdit() {
         row.innerHTML = cells(c);
       }
       filterTable();
-      rxToast('Saved ' + data.customer.name, 'success');
+      showToast('Saved ' + data.customer.name, 'success');
     } else {
       showModalAlert('edit', formatErrors(data.errors));
     }
@@ -364,7 +364,7 @@ async function submitDel() {
       closeModal('modal-del');
       document.getElementById('customer-row-' + pk)?.remove();
       updateCount();
-      rxToast('Deleted ' + data.name, 'success');
+      showToast('Deleted ' + data.name, 'success');
     } else {
       showModalAlert('del', formatErrors(data.errors));
     }

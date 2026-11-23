@@ -77,12 +77,6 @@
   .del-q { font-size: 16px; }
   .del-note { font-size: 14px; color: var(--ink-2); margin-top: 6px; }
 
-  /* ── Toast ── */
-  .toast { position: fixed; left: 50%; bottom: 24px; z-index: 9999; transform: translate(-50%, 16px); opacity: 0; pointer-events: none; display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--ink); color: #fff; font-size: 14px; font-weight: 600; box-shadow: 0 8px 24px rgba(30,36,48,.25); max-width: calc(100vw - 32px); transition: transform .22s var(--ease-out), opacity .22s var(--ease-out); }
-  .toast.show { transform: translate(-50%, 0); opacity: 1; }
-  .toast.success .bi { color: #7BD3A0; }
-  .toast.warning .bi { color: #F2C46B; }
-  .toast.error { background: var(--red); }
 
   @media (max-width: 760px) {
     .rx-toolbar { padding: 12px; }
@@ -96,18 +90,6 @@
 </style>
 <script>
   // Shared by the Records pages
-  const RX_TOAST_ICONS = { success: 'bi-check-circle-fill', error: 'bi-x-circle-fill', warning: 'bi-exclamation-triangle-fill' };
-  function rxToast(msg, type) {
-    type = type || 'success';
-    let t = document.getElementById('toast');
-    if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite'); document.body.appendChild(t); }
-    t.className = 'toast ' + type;
-    t.innerHTML = '<i class="bi ' + RX_TOAST_ICONS[type] + '" aria-hidden="true"></i><span></span>';
-    t.querySelector('span').textContent = msg;
-    requestAnimationFrame(() => t.classList.add('show'));
-    clearTimeout(rxToast._t);
-    rxToast._t = setTimeout(() => t.classList.remove('show'), 3500);
-  }
   function rxEsc(text) {
     const div = document.createElement('div');
     div.textContent = text == null ? '' : text;

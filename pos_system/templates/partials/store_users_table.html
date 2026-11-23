@@ -111,17 +111,6 @@
 .roles-table .ctr { text-align: center; width: 90px; }
 .roles-table .no { color: var(--ink-3); }
 .sd-roles-note { padding: 10px 20px 14px; font-size: 13px; color: var(--ink-3); }
-.app-toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 1100; transform: translate(-50%, 16px);
-  display: flex; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 32px));
-  padding: 10px 16px; border-radius: var(--radius); background: var(--ink); color: #fff;
-  font-size: 14px; box-shadow: 0 8px 24px rgba(30,36,48,.25);
-  opacity: 0; pointer-events: none; transition: opacity .22s var(--ease-out), transform .22s var(--ease-out);
-}
-.app-toast.show { opacity: 1; transform: translate(-50%, 0); }
-.app-toast.ok i { color: #7FD3A0; }
-.app-toast.warn i { color: #F2C46D; }
-.app-toast.err { background: var(--red); }
 .sd-users { container-type: inline-size; }
 @container (max-width: 780px) {
   .u-table thead { display: none; }

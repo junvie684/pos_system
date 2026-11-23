@@ -181,14 +181,12 @@
   </button>
 </main>
 
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <style>
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
 
 /* Register fills the content area edge to edge */
 .content:has(> .register) { padding: 0; }
-.content:has(> .register) > #messages-container { margin: 16px 24px 0 !important; }
 .register {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 440px;
@@ -399,22 +397,6 @@
 
 .mobile-bar { display: none; }
 
-/* ── Toast ── */
-.toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 9999;
-  transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px; border-radius: var(--radius);
-  background: var(--ink); color: #fff; font-size: 14px; font-weight: 600;
-  box-shadow: 0 8px 24px rgba(30,36,48,.25);
-  transition: transform .22s var(--ease-out), opacity .22s var(--ease-out);
-  max-width: calc(100vw - 32px);
-}
-.toast.show { transform: translate(-50%, 0); opacity: 1; }
-.toast .bi { font-size: 16px; }
-.toast.ok .bi { color: #7BD3A0; }
-.toast.warn .bi { color: #F2C46B; }
-.toast.err { background: var(--red); }
 
 /* ── Tablet ── */
 @media (max-width: 1199px) { .register { grid-template-columns: minmax(0,1fr) 400px; } .ct-value { font-size: 38px; } }
@@ -441,7 +423,7 @@
   .mobile-bar .fig#mb-total { font-size: 20px; font-weight: 700; margin-left: auto; }
   .mb-go { height: 40px; padding: 0 14px; border-radius: var(--radius); background: var(--red); display: inline-flex; align-items: center; gap: 6px; }
   .mobile-bar.is-hidden { display: none; }
-  .toast { bottom: 80px; }
+  .app-toast { bottom: 80px; }   /* clear the mobile checkout bar */
   .scan-hint { display: none; }
 }
 </style>
@@ -645,19 +627,6 @@ function setScannerMsg(msg, kind) {
 }
 
 document.addEventListener('DOMContentLoaded', () => scanInput.focus());
-
-// ── Toast ───────────────────────────────────────────────────────────────────
-const TOAST_ICONS = { ok: 'bi-check-circle-fill', warn: 'bi-exclamation-triangle-fill', err: 'bi-x-circle-fill', info: 'bi-info-circle-fill' };
-function showToast(msg, tone) {
-  tone = tone || 'ok';
-  const t = document.getElementById('toast');
-  t.className = 'toast ' + tone;
-  t.innerHTML = '<i class="bi ' + TOAST_ICONS[tone] + '" aria-hidden="true"></i><span></span>';
-  t.querySelector('span').textContent = msg;
-  requestAnimationFrame(() => t.classList.add('show'));
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => t.classList.remove('show'), 2600);
-}
 
 // ── Cart ────────────────────────────────────────────────────────────────────
 let cart = {};

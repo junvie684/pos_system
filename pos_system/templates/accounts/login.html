@@ -1,26 +1,18 @@
 {% extends 'base.html' %}
 {% block title %}Sign in — POS{% endblock %}
-{% block messages %}{% endblock %}
 {% block content %}
 <main class="signin" data-cashier-screen="sign-in" aria-labelledby="login-title">
   <div class="signin-slip">
     <h1 id="login-title">Sign in</h1>
     <p class="signin-lede">Use the account your store manager gave you.</p>
 
-    {% if messages or form.non_field_errors %}
+    {# Messages show in the toast (base.html); form errors stay here, next to the form. #}
+    {% if form.non_field_errors %}
     <div class="signin-notes">
-      {% for message in messages %}
-      <div class="alert alert-{{ message.tags }}" role="{% if message.tags == 'error' %}alert{% else %}status{% endif %}">
-        <i class="bi bi-{% if message.tags == 'success' %}check-circle{% elif message.tags == 'error' %}x-circle{% else %}info-circle{% endif %}" aria-hidden="true"></i>
-        <span>{{ message }}</span>
-      </div>
-      {% endfor %}
-      {% if form.non_field_errors %}
       <div class="alert alert-error" role="alert">
         <i class="bi bi-x-circle" aria-hidden="true"></i>
         <span>{{ form.non_field_errors|join:" " }}</span>
       </div>
-      {% endif %}
     </div>
     {% endif %}
 

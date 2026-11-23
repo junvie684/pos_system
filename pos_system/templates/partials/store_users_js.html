@@ -29,20 +29,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop.open').forEach(el => closeModal(el.id));
 });
 
-/* ── Toast ─────────────────────────────────────── */
-let toastTimer;
-function showToast(msg, type = 'success') {
-  const toast = document.getElementById('toast');
-  const tone = { success: 'ok', warning: 'warn', error: 'err' }[type] || 'ok';
-  const icon = { ok: 'bi bi-check-circle-fill', warn: 'bi bi-exclamation-triangle-fill', err: 'bi bi-x-circle-fill' }[tone];
-  toast.className = 'app-toast ' + tone;
-  document.getElementById('toast-icon').className = icon;
-  document.getElementById('toast-msg').textContent = msg;
-  requestAnimationFrame(() => toast.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
-}
-
 /* ── Inline modal alert ────────────────────────── */
 function showModalAlert(prefix, msg) {
   const al = document.getElementById(prefix + '-alert');

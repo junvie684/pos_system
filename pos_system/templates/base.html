@@ -392,13 +392,26 @@
     .alert-error, .alert-danger { background: var(--red-tint); border-color: var(--red-rule); color: var(--red-ink-deep); }
     .alert-warning { background: var(--amber-tint); border-color: #EED9AE; color: #6E4300; }
     .alert-info { background: var(--carbon); border-color: var(--carbon-rule); color: var(--carbon-ink); }
-    .alert-close {
-      margin-left: auto; background: none; border: none;
-      width: 32px; height: 32px; border-radius: var(--radius);
-      color: inherit; opacity: .7; cursor: pointer; font-size: 16px;
-      display: inline-flex; align-items: center; justify-content: center;
+
+    /* ── Toast: every message after an action, lower centre ── */
+    .app-toast {
+      position: fixed; left: 50%; bottom: 24px; z-index: 9999;
+      transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+      display: flex; align-items: center; gap: 10px;
+      max-width: min(520px, calc(100vw - 32px));
+      padding: 10px 16px; border-radius: var(--radius);
+      background: var(--ink); color: #fff; font-size: 14px; font-weight: 600; line-height: 1.35;
+      box-shadow: 0 8px 24px rgba(30,36,48,.25); cursor: pointer;
+      transition: transform .22s var(--ease-out), opacity .22s var(--ease-out);
     }
-    .alert-close:hover { opacity: 1; background: rgba(30,36,48,.06); }
+    .app-toast.show { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+    .app-toast .bi { font-size: 16px; flex-shrink: 0; }
+    .app-toast.ok .bi { color: #7BD3A0; }
+    .app-toast.info .bi { color: #A9C4F5; }
+    .app-toast.warn .bi { color: #F2C46B; }
+    .app-toast.err { background: var(--red); }
+    .app-toast.err .bi { color: #fff; }
+    @media (prefers-reduced-motion: reduce) { .app-toast { transition: opacity .01s; } }
 
     /* ── Modal ─────────────────────────────────────────── */
     .modal-backdrop {
@@ -602,6 +615,48 @@
       *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
     }
   </style>
+  <script>
+    /* One toast for the whole app. showToast(message, type): type is
+       success | info | warning | error (ok / warn / err / danger also work).
+       Successes and info fade after 3.5s, warnings and errors stay 6s;
+       a click dismisses it. A new message replaces the one on screen. */
+    (function () {
+      const TONES = { success: 'ok', ok: 'ok', info: 'info', warning: 'warn', warn: 'warn',
+                      error: 'err', err: 'err', danger: 'err' };
+      const ICONS = { ok: 'bi-check-circle-fill', info: 'bi-info-circle-fill',
+                      warn: 'bi-exclamation-triangle-fill', err: 'bi-x-circle-fill' };
+      let timer;
+      function el() {
+        let t = document.getElementById('toast');
+        if (!t) {
+          t = document.createElement('div');
+          t.id = 'toast';
+          t.setAttribute('role', 'status');
+          t.addEventListener('click', hideToast);
+          document.body.appendChild(t);
+        }
+        return t;
+      }
+      function hideToast() {
+        clearTimeout(timer);
+        const t = document.getElementById('toast');
+        if (t) t.classList.remove('show');
+      }
+      function showToast(message, type) {
+        const tone = TONES[type] || 'ok';
+        const t = el();
+        t.setAttribute('aria-live', tone === 'err' ? 'assertive' : 'polite');
+        t.className = 'app-toast ' + tone;
+        t.innerHTML = '<i class="bi ' + ICONS[tone] + '" aria-hidden="true"></i><span></span>';
+        t.querySelector('span').textContent = message;
+        requestAnimationFrame(() => t.classList.add('show'));
+        clearTimeout(timer);
+        timer = setTimeout(hideToast, tone === 'ok' || tone === 'info' ? 3500 : 6000);
+      }
+      window.showToast = showToast;
+      window.hideToast = hideToast;
+    })();
+  </script>
 </head>
 <body>
 
@@ -689,34 +744,6 @@
   </div>
   {% endif %}
   <div class="content">
-    {% block messages %}
-    {% if messages %}
-    <div id="messages-container" style="margin-bottom:16px;">
-      {% for message in messages %}
-      <div class="alert alert-{{ message.tags }}">
-        <i class="bi bi-{% if message.tags == 'success' %}check-circle{% elif message.tags == 'error' or message.tags == 'danger' %}x-circle{% elif message.tags == 'warning' %}exclamation-triangle{% else %}info-circle{% endif %}"></i>
-        {{ message }}
-        <button class="alert-close" onclick="this.parentElement.remove()">
-          <i class="bi bi-x"></i>
-        </button>
-      </div>
-      {% endfor %}
-    </div>
-    <script>
-      setTimeout(() => {
-        const container = document.getElementById('messages-container');
-        if (container) {
-          container.querySelectorAll('.alert').forEach(el => {
-            el.style.transition = 'opacity 0.4s, margin 0.4s';
-            el.style.opacity = '0';
-            el.style.marginBottom = '0';
-            setTimeout(() => el.remove(), 400);
-          });
-        }
-      }, 4000);
-    </script>
-    {% endif %}
-    {% endblock messages %}
     {% block content %}{% endblock %}
   </div>
 </div>
@@ -823,5 +850,22 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !list.hidden) { setOpen(false); btn.focus(); } });
   })();
 </script>
+{# Messages the server set before a redirect show in the same toast, one after another. #}
+{% if messages %}
+<ul id="server-messages" hidden>{% for message in messages %}<li data-type="{{ message.level_tag }}">{{ message }}</li>{% endfor %}</ul>
+<script>
+  (function () {
+    const list = document.getElementById('server-messages');
+    const items = Array.from(list.children, li => [li.textContent, li.dataset.type]);
+    list.remove();
+    (function next(i) {
+      if (i >= items.length) return;
+      const [text, type] = items[i];
+      showToast(text, type);
+      setTimeout(() => next(i + 1), type === 'error' || type === 'warning' ? 6000 : 3500);
+    })(0);
+  })();
+</script>
+{% endif %}
 </body>
 </html>

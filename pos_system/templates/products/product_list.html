@@ -21,7 +21,6 @@
 <div class="card rx-box">
 {% include 'partials/records_tabs.html' %}
 
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
 <div class="rx-toolbar">
   <form method="get" id="search-form" class="rx-search" role="search">
@@ -309,20 +308,6 @@ document.addEventListener('keydown', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop.open').forEach(el => closeModal(el.id));
 });
-
-// ── Toast ─────────────────────────────────────────────
-const TOAST_ICONS = { success: 'bi-check-circle-fill', error: 'bi-x-circle-fill', warning: 'bi-exclamation-triangle-fill' };
-let toastTimer;
-function showToast(msg, type) {
-  type = type || 'success';
-  const t = document.getElementById('toast');
-  t.className = 'toast ' + type;
-  t.innerHTML = '<i class="bi ' + TOAST_ICONS[type] + '" aria-hidden="true"></i><span></span>';
-  t.querySelector('span').textContent = msg;
-  requestAnimationFrame(() => t.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
-}
 
 // ── Inline modal alert ────────────────────────────────
 function showModalAlert(prefix, msg) {
