@@ -23,5 +23,9 @@ media/
 .vscode/
 .idea/
 
+# Local tool state and notes
+.impeccable/
+/tasks/
+
 # Ngrok / local tunnel
 tunnel.py
