@@ -1,12 +1,12 @@
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
-from django.contrib.auth.forms import AuthenticationForm
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.http import JsonResponse
 
 from .decorators import admin_required
 from .models import UserProfile
+from .throttle import ThrottledAuthenticationForm
 from tenants.middleware import get_current_tenant_id
 from tenants.models import Tenant
 
@@ -16,7 +16,7 @@ def login_view(request):
     if request.user.is_authenticated and request.session.get('app_type') == 'pos':
         return redirect('/')
 
-    form = AuthenticationForm(data=request.POST or None)
+    form = ThrottledAuthenticationForm(request, data=request.POST or None)
     if form.is_valid():
         user = form.get_user()
         profile = UserProfile.all_objects.filter(user=user).exclude(tenant_id__isnull=True).first()

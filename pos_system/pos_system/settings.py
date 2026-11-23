@@ -184,6 +184,26 @@ STORAGES = {
     },
 }
 
+# ─── Passwords & sign-in ──────────────────────────────────────
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 8}},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+# accounts/throttle.py: lock a username after this many failed sign-ins.
+LOGIN_FAILURE_LIMIT    = 5
+LOGIN_LOCKOUT_SECONDS  = 15 * 60
+
+# The sign-in throttle keeps its counts in the cache, so every gunicorn worker
+# must see the same cache: production uses a database table (created by
+# `manage.py createcachetable` in the Procfile). Dev and tests use memory.
+if DEBUG or TESTING:
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+else:
+    CACHES = {'default': {'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+                          'LOCATION': 'django_cache'}}
+
 # ─── Auth Redirects ───────────────────────────────────────────
 LOGIN_URL           = '/accounts/login/'
 LOGIN_REDIRECT_URL  = '/'

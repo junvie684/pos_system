@@ -11,7 +11,7 @@ from django.db.models import Sum, F
 from django.http import HttpResponse
 from django.core.paginator import Paginator
 
-from accounts.decorators import manager_or_admin_required
+from accounts.decorators import feature_required
 from sales.models import Sale, SaleItem
 
 from .ledger import refunds_given, refunds_given_by, sales_made, total_of
@@ -79,7 +79,7 @@ def _ledger_context(ledger, request):
     }
 
 
-@manager_or_admin_required
+@feature_required('can_access_reports')
 def daily_report(request):
     # --- Date Filter ---
     try:
@@ -100,7 +100,7 @@ def daily_report(request):
     })
 
 
-@manager_or_admin_required
+@feature_required('can_access_reports')
 def monthly_report(request):
     now = timezone.localtime()
 
@@ -136,7 +136,7 @@ def monthly_report(request):
 
 # ─── Analytics (unified Daily / Weekly / Monthly) ────────────────
 
-@manager_or_admin_required
+@feature_required('can_access_reports')
 def analytics(request):
     now = timezone.localtime()
     today = timezone.localdate()
@@ -372,26 +372,8 @@ def analytics(request):
     })
 
 
-# ─── Custom decorator for shift report ───────────────────────────
-def shift_report_required(view_func):
-    def _wrapped_view(request, *args, **kwargs):
-        if not request.user.is_authenticated or request.session.get('app_type') != 'pos':
-            return redirect('accounts:login')
-
-        # Allow if admin/manager OR has shift_report permission
-        if (request.user.is_superuser or request.user.is_staff or
-                getattr(request.user.profile, 'can_access_shift_report', False)):
-            return view_func(request, *args, **kwargs)
-
-        from django.contrib import messages
-        from django.shortcuts import redirect
-        messages.error(request, 'Access denied. Shift report access required.')
-        return redirect('/')
-
-    return _wrapped_view
-
 # ─── Cash Closing Report (Shift Report) ──────────────────────────
-@shift_report_required
+@feature_required('can_access_shift_report')
 def shift_report(request):
     now = timezone.localtime()
     today = timezone.localdate()

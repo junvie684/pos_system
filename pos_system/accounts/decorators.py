@@ -1,6 +1,7 @@
 from functools import wraps
 from django.shortcuts import redirect
 from django.contrib import messages
+from django.http import JsonResponse
 
 
 def get_user_role(user):
@@ -68,3 +69,35 @@ def pos_login_required(view_func):
             return redirect('accounts:login')
         return view_func(request, *args, **kwargs)
     return _wrapped
+
+
+FEATURE_NAMES = {
+    'can_access_products': 'Products',
+    'can_access_categories': 'Categories',
+    'can_access_reports': 'Reports',
+    'can_access_shift_report': 'Cash closing',
+}
+
+
+def feature_required(flag):
+    """
+    Allow a POS user whose profile has `flag` switched on, whatever their role.
+    The access switches on the user form are the source of truth: the sidebar
+    hides what's switched off, and this refuses it on the server too.
+    """
+    def decorator(view_func):
+        @wraps(view_func)
+        def _wrapped(request, *args, **kwargs):
+            if not _is_pos_session(request):
+                return redirect('accounts:login')
+
+            profile = getattr(request.user, 'profile', None)
+            if not getattr(profile, flag, False):
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'ok': False, 'error': 'Access denied.'}, status=403)
+                messages.error(request, f"You don't have access to {FEATURE_NAMES.get(flag, 'that page')}.")
+                return redirect('sales:dashboard')
+
+            return view_func(request, *args, **kwargs)
+        return _wrapped
+    return decorator

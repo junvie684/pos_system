@@ -1,10 +1,6 @@
 import threading
 from contextlib import contextmanager
 
-import jwt
-from django.conf import settings
-from django.http import JsonResponse
-
 from tenants.models import Tenant
 
 _thread_locals = threading.local()
@@ -32,18 +28,8 @@ class TenantMiddleware:
     def __call__(self, request):
         _thread_locals.tenant_id = None
 
+        # The store comes only from the signed-in session, set at POS login.
         tenant_id = request.session.get('tenant_id')
-
-        if not tenant_id:
-            token = request.META.get('HTTP_AUTHORIZATION', '').replace('Bearer ', '')
-            if token:
-                try:
-                    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-                    tenant_id = payload.get('tenant_id')
-                except jwt.ExpiredSignatureError:
-                    return JsonResponse({'error': 'Token expired'}, status=401)
-                except jwt.InvalidTokenError:
-                    return JsonResponse({'error': 'Invalid token'}, status=401)
 
         # ✅ Kick out already-logged-in users if tenant was deactivated
         if tenant_id and request.user.is_authenticated:

@@ -15,8 +15,20 @@ def make_tenant(slug='store-a'):
     return Tenant.objects.create(name=slug.title(), slug=slug, owner=f'{slug}@example.com')
 
 
+# Access each role gets by default, as the user form ticks it.
+ROLE_ACCESS = {
+    'admin':   dict(can_access_products=True, can_access_categories=True, can_access_reports=True,
+                    can_access_user_management=True, can_access_pending_sales=True,
+                    can_access_shift_report=True),
+    'manager': dict(can_access_products=True, can_access_categories=True, can_access_reports=True,
+                    can_access_pending_sales=True, can_access_shift_report=True),
+    'cashier': {},
+}
+
+
 def make_user(tenant, username, role='cashier', **perms):
-    """role: 'admin' (store admin = superuser today), 'manager' (staff), 'cashier'."""
+    """role: 'admin' (store admin = superuser today), 'manager' (staff), 'cashier'.
+    The profile gets the role's default access; keyword flags override it."""
     user = User.objects.create_user(
         username=username,
         password=PASSWORD,
@@ -24,7 +36,7 @@ def make_user(tenant, username, role='cashier', **perms):
         is_superuser=role == 'admin',
     )
     if tenant is not None:
-        UserProfile.all_objects.create(user=user, tenant_id=tenant.id, **perms)
+        UserProfile.all_objects.create(user=user, tenant_id=tenant.id, **{**ROLE_ACCESS[role], **perms})
     return user
 
 

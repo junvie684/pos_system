@@ -1,6 +1,6 @@
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import User
-from django.contrib.auth.forms import AuthenticationForm
+from accounts.throttle import ThrottledAuthenticationForm
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -332,7 +332,7 @@ def platform_login(request):
             and request.session.get('app_type') == 'admin'):
         return redirect('platform_admin:dashboard')
 
-    form = AuthenticationForm(data=request.POST or None)
+    form = ThrottledAuthenticationForm(request, data=request.POST or None)
     if request.method == 'POST' and form.is_valid():
         user = form.get_user()
         # Store admins are superusers too; only store-less superusers may enter.

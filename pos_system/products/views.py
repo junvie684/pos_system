@@ -6,11 +6,11 @@ from .models import Product, Category
 from .forms import ProductForm
 from django.core.paginator import Paginator
 from django.contrib import messages
-from accounts.decorators import manager_or_admin_required
+from accounts.decorators import feature_required
 
 
 
-@manager_or_admin_required
+@feature_required('can_access_products')
 def product_list(request):
     search = request.GET.get('q', '')
     show_inactive = request.GET.get('show_inactive') == '1'
@@ -60,7 +60,7 @@ def product_list(request):
     })
 
 
-@manager_or_admin_required
+@feature_required('can_access_products')
 def add_product(request):
     if request.method == 'POST':
         form = ProductForm(request.POST, request.FILES)
@@ -87,7 +87,7 @@ def add_product(request):
     return redirect('products:product_list')
 
 
-@manager_or_admin_required
+@feature_required('can_access_products')
 def edit_product(request, pk):
     product = get_object_or_404(Product, pk=pk)
     if request.method == 'POST':
@@ -117,7 +117,7 @@ def edit_product(request, pk):
     return redirect('products:product_list')
 
 
-@manager_or_admin_required
+@feature_required('can_access_products')
 def delete_product(request, pk):
     product = get_object_or_404(Product, pk=pk)
     if request.method == 'POST':
@@ -130,7 +130,7 @@ def delete_product(request, pk):
         return redirect('products:product_list')
     return redirect('products:product_list')
 
-@manager_or_admin_required
+@feature_required('can_access_products')
 def reactivate_product(request, pk):
     product = get_object_or_404(Product, pk=pk)
     if request.method == 'POST':
@@ -144,13 +144,13 @@ def reactivate_product(request, pk):
 
 
 # ─── Categories ──────────────────────────────────────────────
-@manager_or_admin_required
+@feature_required('can_access_categories')
 def category_list(request):
     categories = Category.objects.annotate(product_count=Count('product')).order_by('name')
     return render(request, 'products/category_list.html', {'categories': categories})
 
 
-@manager_or_admin_required
+@feature_required('can_access_categories')
 def add_category(request):
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
@@ -163,7 +163,7 @@ def add_category(request):
     return JsonResponse({'ok': False, 'error': 'Invalid request.'})
 
 
-@manager_or_admin_required
+@feature_required('can_access_categories')
 def edit_category(request, pk):
     category = get_object_or_404(Category, pk=pk)
     if request.method == 'POST':
@@ -176,7 +176,7 @@ def edit_category(request, pk):
     return JsonResponse({'ok': False, 'error': 'Invalid request.'})
 
 
-@manager_or_admin_required
+@feature_required('can_access_categories')
 def delete_category(request, pk):
     category = get_object_or_404(Category, pk=pk)
     if request.method == 'POST':
@@ -197,14 +197,14 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse, HttpResponse
 from django.core.paginator import Paginator
 from django.contrib import messages
-from accounts.decorators import manager_or_admin_required
+from accounts.decorators import feature_required
 from .models import Product, Category
 from .forms import ProductForm
 
 from sales.models import SaleItem
 
 
-@manager_or_admin_required
+@feature_required('can_access_products')
 def product_sales_history(request, product_id):
     product = get_object_or_404(Product, pk=product_id)
 
