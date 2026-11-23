@@ -3,70 +3,98 @@
 {% block page_title %}Sales History{% endblock %}
 {% block content %}
 
-<form method="get" class="filters" role="search" aria-label="Filter sales">
-  <div class="presets" role="group" aria-label="Date range">
-    <a href="?range=today{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'today' %} is-on{% endif %}"{% if preset == 'today' %} aria-current="true"{% endif %}>Today</a>
-    <a href="?range=yesterday{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'yesterday' %} is-on{% endif %}"{% if preset == 'yesterday' %} aria-current="true"{% endif %}>Yesterday</a>
-    <a href="?range=week{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'week' %} is-on{% endif %}"{% if preset == 'week' %} aria-current="true"{% endif %}>This week</a>
-    <a href="?range=month{% if query %}&q={{ query|urlencode }}{% endif %}" class="chip{% if preset == 'month' %} is-on{% endif %}"{% if preset == 'month' %} aria-current="true"{% endif %}>This month</a>
+<form method="get" class="hx-toolbar" role="search" aria-label="Filter sales">
+  <div class="hx-seg" role="group" aria-label="Date range">
+    <a href="?range=today{% if query %}&q={{ query|urlencode }}{% endif %}" class="{% if preset == 'today' %}is-on{% endif %}"{% if preset == 'today' %} aria-current="true"{% endif %}>Today</a>
+    <a href="?range=yesterday{% if query %}&q={{ query|urlencode }}{% endif %}" class="{% if preset == 'yesterday' %}is-on{% endif %}"{% if preset == 'yesterday' %} aria-current="true"{% endif %}>Yesterday</a>
+    <a href="?range=week{% if query %}&q={{ query|urlencode }}{% endif %}" class="{% if preset == 'week' %}is-on{% endif %}"{% if preset == 'week' %} aria-current="true"{% endif %}>This week</a>
+    <a href="?range=month{% if query %}&q={{ query|urlencode }}{% endif %}" class="{% if preset == 'month' %}is-on{% endif %}"{% if preset == 'month' %} aria-current="true"{% endif %}>This month</a>
   </div>
-  <div class="filter-row">
-    <div class="search">
-      <i class="bi bi-search" aria-hidden="true"></i>
-      <label for="q" class="sr-only">Search sales</label>
-      <input type="text" id="q" name="q" value="{{ query }}" placeholder="Sale number, customer or cashier" class="form-control">
-    </div>
-    <label class="date"><span>From</span><input type="date" name="date_from" value="{{ date_from }}" class="form-control"></label>
-    <label class="date"><span>To</span><input type="date" name="date_to" value="{{ date_to }}" class="form-control"></label>
-    <button type="submit" class="btn btn-primary">Apply</button>
-    {% if query or date_from or date_to %}
-    <a href="{% url 'sales:sale_history' %}" class="btn btn-ghost">Clear</a>
-    {% endif %}
+  <div class="hx-search">
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <label for="q" class="sr-only">Search sales</label>
+    <input type="text" id="q" name="q" value="{{ query }}" placeholder="Sale no., customer or cashier" class="form-control">
   </div>
+  <div class="hx-dates">
+    <label class="sr-only" for="date_from">From</label>
+    <input type="date" id="date_from" name="date_from" value="{{ date_from }}" class="form-control" title="From">
+    <span aria-hidden="true">–</span>
+    <label class="sr-only" for="date_to">To</label>
+    <input type="date" id="date_to" name="date_to" value="{{ date_to }}" class="form-control" title="To">
+  </div>
+  <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+  {% if query or date_from or date_to %}
+  <a href="{% url 'sales:sale_history' %}" class="btn btn-ghost btn-sm">Clear</a>
+  {% endif %}
 </form>
 
-<div class="summary" aria-live="polite">
-  <div><span class="s-label">Completed sales</span><span class="s-val fig">{{ filtered_count }}</span></div>
-  <div class="s-total"><span class="s-label">Completed total</span><span class="s-val fig">₱{{ filtered_total|floatformat:"2g" }}</span></div>
-  <div><span class="s-label">Refunded</span><span class="s-val fig">{{ refunded_count }}</span></div>
-  <p class="s-scope">{{ scope_label }}{% if query %} · matching “{{ query }}”{% endif %}</p>
+<div class="hx-strip" aria-live="polite">
+  <div class="hx-kpi"><span class="hx-k">Completed sales</span><span class="hx-v fig">{{ filtered_count }}</span></div>
+  <div class="hx-kpi hx-kpi-total"><span class="hx-k">Completed total</span><span class="hx-v fig">₱{{ filtered_total|floatformat:"2g" }}</span></div>
+  <div class="hx-kpi"><span class="hx-k">Refunded</span><span class="hx-v fig{% if refunded_count %} is-neg{% endif %}">{{ refunded_count }}</span></div>
+  <p class="hx-scope"><i class="bi bi-calendar3" aria-hidden="true"></i> {{ scope_label }}{% if query %} · matching “{{ query }}”{% endif %}</p>
 </div>
 
-<div class="card table-card">
+{% if archive_unavailable %}
+<div class="alert alert-warning hx-note" role="status">
+  <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+  <span>The archive database isn't reachable, so older archived sales aren't listed right now.</span>
+</div>
+{% endif %}
+<div class="card table-card hx-card">
   <div class="table-wrap">
-    <table class="sales-table">
+    <table class="hx-table">
       <thead>
-        <tr><th scope="col">Sale</th><th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Cashier</th><th scope="col">Items</th><th scope="col" class="num">Total</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
+        <tr>
+          <th scope="col">OR No.</th>
+          <th scope="col">Date</th>
+          <th scope="col">Customer</th>
+          <th scope="col">Cashier</th>
+          <th scope="col">Items</th>
+          <th scope="col">Payment</th>
+          <th scope="col" class="num">Total</th>
+          <th scope="col">Status</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
       </thead>
       <tbody>
         {% for sale in sales %}
-        <tr>
-          <td class="serial-cell fig">#{{ sale.pk }}</td>
-          <td class="date-cell"><span>{{ sale.created_at|date:"M d, Y" }}</span><span class="fig sub">{{ sale.created_at|date:"H:i" }}</span></td>
-          <td>{{ sale.customer|default:"Walk-in" }}</td>
-          <td>{{ sale.cashier }}</td>
-          <td class="items-cell">
-            {% for item in sale.items.all %}<span>{{ item.product.name }} <span class="fig qty">×{{ item.quantity }}</span></span>{% if not forloop.last %}, {% endif %}{% endfor %}
+        <tr class="{% if sale.status == 'refunded' %}is-refunded{% endif %}{% if sale.is_archived %} is-archived{% endif %}">
+          <td class="hx-serial fig">{{ sale.or_display|default:"—" }} <span class="hx-id">ID {{ sale.pk }}{% if sale.is_archived %} <span class="hx-archived" title="Moved to the archive database after the store's retention period. Read-only.">Archived</span>{% endif %}</span></td>
+          <td class="hx-date fig">{{ sale.created_at|date:"M d, Y" }} <span>{{ sale.created_at|date:"H:i" }}</span></td>
+          <td class="hx-who">{{ sale.customer|default:"Walk-in" }}</td>
+          <td class="hx-who">{{ sale.cashier }}</td>
+          <td class="hx-items" title="{% for item in sale.items.all %}{{ item.product.name }} ×{{ item.quantity }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+            <span class="hx-count fig">{{ sale.items.all|length }}</span>{% for item in sale.items.all %}{{ item.product.name }} <span class="fig hx-qty">×{{ item.quantity }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}
           </td>
-          <td class="strong fig num">₱{{ sale.total|floatformat:"2g" }}</td>
+          <td class="hx-pay">{{ sale.get_payment_method_display }}</td>
+          <td class="hx-total fig num">₱{{ sale.total|floatformat:"2g" }}</td>
           <td>
-            {% if sale.status == 'completed' %}<span class="badge badge-green">Completed</span>
-            {% elif sale.status == 'refunded' %}<span class="badge badge-red">Refunded</span>
-            {% else %}<span class="badge badge-amber">{{ sale.get_status_display }}</span>{% endif %}
+            {% if sale.status == 'completed' %}<span class="hx-status ok">Completed</span>
+            {% elif sale.status == 'refunded' %}<span class="hx-status neg">Refunded</span>
+            {% else %}<span class="hx-status warn">{{ sale.get_status_display }}</span>{% endif %}
           </td>
           <td>
             <div class="row-actions">
-              <button type="button" class="btn btn-ghost btn-sm icon-btn" onclick="openReceiptModal({{ sale.pk }})" aria-label="View receipt for sale {{ sale.pk }}" title="Receipt">
+              <button type="button" class="hx-icon" onclick="openReceiptModal('{% if sale.is_archived %}{% url 'archive:archived_receipt' sale.pk %}{% else %}{% url 'sales:receipt' sale.pk %}{% endif %}')" aria-label="View receipt for sale {{ sale.pk }}" title="Receipt">
                 <i class="bi bi-receipt" aria-hidden="true"></i>
               </button>
               {% if sale.status == 'completed' and user.is_staff or sale.status == 'completed' and user.is_superuser %}
-              <button type="button" class="btn btn-ghost btn-sm" onclick="openRefundModal({{ sale.pk }})">Refund</button>
+              {% if sale.is_archived %}
+              <button type="button" class="hx-icon" disabled aria-label="Archived sales can't be refunded" title="Archived sales can't be refunded">
+                <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+              </button>
+              {% else %}
+              <button type="button" class="hx-icon is-danger" onclick="openRefundModal({{ sale.pk }})" aria-label="Refund sale {{ sale.pk }}" title="Refund">
+                <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+              </button>
+              {% endif %}
               {% endif %}
             </div>
           </td>
         </tr>
         {% empty %}
-        <tr><td colspan="8" class="empty-cell">
+        <tr><td colspan="9" class="empty-cell">
           <i class="bi bi-receipt" aria-hidden="true"></i>
           {% if query or date_from or date_to %}No sales match these filters. Try a wider date range or clear the search.{% else %}No sales yet. Completed sales will show up here.{% endif %}
         </td></tr>
@@ -75,12 +103,13 @@
     </table>
   </div>
 
-  {% if sales.has_other_pages %}
-  <nav class="pager" aria-label="Pages">
-    <span class="pager-info">Page <b class="fig">{{ sales.number }}</b> of <span class="fig">{{ sales.paginator.num_pages }}</span></span>
+  {% if sales.paginator.count %}
+  <nav class="pager hx-pager" aria-label="Pages">
+    <span class="pager-info">Showing <b class="fig">{{ sales.start_index }}–{{ sales.end_index }}</b> of <span class="fig">{{ sales.paginator.count }}</span></span>
+    {% if sales.has_other_pages %}
     <div class="pager-links">
       {% if sales.has_previous %}
-      <a class="btn btn-ghost btn-sm" href="?q={{ query|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if preset %}&range={{ preset }}{% endif %}&page={{ sales.previous_page_number }}"><i class="bi bi-chevron-left" aria-hidden="true"></i> Prev</a>
+      <a class="pg" href="?q={{ query|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if preset %}&range={{ preset }}{% endif %}&page={{ sales.previous_page_number }}" aria-label="Previous page"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
       {% endif %}
       {% for num in sales.paginator.page_range %}
         {% if sales.number == num %}
@@ -90,79 +119,108 @@
         {% endif %}
       {% endfor %}
       {% if sales.has_next %}
-      <a class="btn btn-ghost btn-sm" href="?q={{ query|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if preset %}&range={{ preset }}{% endif %}&page={{ sales.next_page_number }}">Next <i class="bi bi-chevron-right" aria-hidden="true"></i></a>
+      <a class="pg" href="?q={{ query|urlencode }}&date_from={{ date_from }}&date_to={{ date_to }}{% if preset %}&range={{ preset }}{% endif %}&page={{ sales.next_page_number }}" aria-label="Next page"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>
       {% endif %}
     </div>
+    {% endif %}
   </nav>
   {% endif %}
 </div>
 
 <style>
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
-.filters { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
-.presets { display: flex; gap: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-.presets::-webkit-scrollbar { display: none; }
-.presets .chip { flex-shrink: 0; }
-.serial-cell { color: var(--red); font-weight: 700; letter-spacing: .5px; }
-.s-total .s-val { border-top: 2px solid var(--ink); padding-top: 2px; margin-top: 2px; }
-.chip { display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border: 1px solid var(--chip-rule); border-radius: var(--radius); background: var(--panel); color: var(--ink); font-size: 14px; font-weight: 600; text-decoration: none; transition: background-color .12s, border-color .12s; }
-.chip:hover { background: var(--paper-2); border-color: var(--rule-strong); }
-.chip.is-on { background: var(--ink); border-color: var(--ink); color: #fff; }
-.filter-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
-.search { position: relative; flex: 1 1 280px; }
-.search .bi { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
-.search .form-control { padding-left: 36px; }
-.date { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
-.date .form-control { width: 168px; }
 
-.summary { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 32px; padding: 14px 0 16px; margin-bottom: 4px; }
-.summary > div { display: flex; flex-direction: column; }
-.s-label { font-size: 13px; font-weight: 600; color: var(--ink-3); }
-.s-val { font-size: 22px; font-weight: 700; letter-spacing: -.5px; }
-.s-scope { margin-left: auto; font-size: 13.5px; color: var(--ink-2); }
+/* ── Toolbar: one row ── */
+.hx-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.hx-toolbar .form-control { min-height: 36px; height: 36px; padding: 0 10px; font-size: 14px; }
+.hx-toolbar .btn-sm { min-height: 36px; padding: 0 14px; }
+.hx-seg { display: inline-flex; border: 1px solid var(--rule-strong); background: var(--panel); flex-shrink: 0; }
+.hx-seg a { display: inline-flex; align-items: center; height: 34px; padding: 0 12px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); text-decoration: none; white-space: nowrap; transition: background-color .12s, color .12s; }
+.hx-seg a + a { border-left: 1px solid var(--rule); }
+.hx-seg a:hover { background: var(--paper-2); color: var(--ink); }
+.hx-seg a.is-on { background: var(--ink); color: #fff; }
+.hx-search { position: relative; flex: 1 1 240px; min-width: 200px; }
+.hx-search .bi { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font-size: 14px; }
+.hx-search .form-control { padding-left: 32px; }
+.hx-dates { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); }
+.hx-dates .form-control { width: 148px; font-family: var(--font-fig); font-size: 13px; }
 
-.table-card { padding: 0; overflow: hidden; }
-.sales-table th:first-child, .sales-table td:first-child { padding-left: 20px; }
-.sales-table th:last-child, .sales-table td:last-child { padding-right: 20px; }
-.num { text-align: right; }
-.date-cell { white-space: nowrap; }
-.date-cell span { display: block; }
-.date-cell .sub { font-size: 12px; color: var(--ink-3); }
-.items-cell { font-size: 13.5px; color: var(--ink-2); max-width: 340px; }
-.items-cell .qty { font-size: 12px; color: var(--ink-3); }
-.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.icon-btn { width: 36px; padding: 0; }
-.empty-cell { text-align: center; padding: 48px 16px !important; color: var(--ink-3); }
+/* ── Summary strip ── */
+.hx-strip { display: flex; align-items: stretch; flex-wrap: wrap; margin-bottom: 12px; background: var(--panel); border: 1px solid var(--rule); }
+.hx-kpi { display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 10px 20px; border-right: 1px solid var(--rule); }
+.hx-k { font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
+.hx-v { font-size: 20px; font-weight: 700; letter-spacing: -.4px; color: var(--ink); line-height: 1.2; }
+.hx-v.is-neg { color: var(--red-ink); }
+.hx-kpi-total { background: var(--carbon); }
+.hx-kpi-total .hx-v { color: var(--ink); }
+.hx-scope { margin-left: auto; align-self: center; padding: 10px 20px; font-size: 13px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 8px; }
+.hx-scope .bi { color: var(--ink-3); }
+
+/* ── Dense table ── */
+.hx-card { padding: 0; overflow: hidden; }
+.hx-table { font-size: 13.5px; }
+.hx-table thead th { position: sticky; top: 0; z-index: 1; padding: 8px 12px; font-size: 11px; background: var(--paper-2); }
+.hx-table tbody td { padding: 7px 12px; height: 44px; white-space: nowrap; color: var(--ink-2); }
+.hx-table th:first-child, .hx-table td:first-child { padding-left: 16px; }
+.hx-table th:last-child, .hx-table td:last-child { padding-right: 12px; }
+.hx-table tbody tr:nth-child(even) { background: #FCFCFA; }
+.hx-table tbody tr:hover { background: var(--carbon); }
+.hx-table .hx-serial { color: var(--red); font-weight: 700; letter-spacing: .4px; }
+.hx-table .hx-date { font-size: 12.5px; color: var(--ink); }
+.hx-date span { color: var(--ink-3); margin-left: 4px; }
+.hx-serial .hx-id { display: block; font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--ink-3); }
+.hx-table .hx-who { max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+.hx-items { max-width: 300px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.hx-count { display: inline-block; min-width: 20px; margin-right: 8px; padding: 0 5px; text-align: center; background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink); font-size: 12px; font-weight: 700; }
+.hx-qty { font-size: 12px; color: var(--ink-3); }
+.hx-pay { font-size: 13px; }
+.hx-table .hx-total { font-weight: 700; color: var(--ink); font-size: 14px; }
+.hx-table .is-refunded .hx-total { color: var(--ink-3); text-decoration: line-through; text-decoration-thickness: 1px; }
+.hx-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; }
+.hx-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.hx-status.ok { color: #1F6B3D; }
+.hx-status.neg { color: var(--red-ink); }
+.hx-status.warn { color: var(--amber-ink); }
+.row-actions { display: flex; gap: 2px; justify-content: flex-end; }
+.hx-icon { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: transparent; color: var(--ink-2); font-size: 15px; cursor: pointer; transition: background-color .12s, border-color .12s, color .12s; }
+.hx-icon:hover { background: var(--panel); border-color: var(--rule-strong); color: var(--ink); }
+.hx-icon.is-danger:hover { background: var(--red-tint); border-color: var(--red-rule); color: var(--red-ink); }
+.hx-icon:disabled { color: var(--rule-strong); cursor: not-allowed; background: transparent; border-color: transparent; }
+.hx-archived { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 4px; background: var(--paper-2); border: 1px solid var(--rule); color: var(--ink-2); font-family: var(--font-ui); font-size: 12px; font-weight: 600; line-height: 1.5; cursor: help; }
+.hx-note { margin-bottom: 12px; }
+.empty-cell { text-align: center; padding: 48px 16px !important; color: var(--ink-3); white-space: normal !important; }
 .empty-cell .bi { display: block; font-size: 24px; color: var(--rule-strong); margin-bottom: 8px; }
+.hx-pager { padding: 8px 16px; background: var(--paper); }
+.hx-pager .pg { height: 30px; min-width: 30px; }
 
-.pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--rule); }
-.pager-info { font-size: 13.5px; color: var(--ink-2); }
-.pager-links { display: flex; gap: 4px; align-items: center; }
-.pg { min-width: 36px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); font-size: 13px; font-weight: 700; color: var(--ink); text-decoration: none; }
-.pg:hover { background: var(--paper-2); }
-.pg.is-on { background: var(--ink); color: #fff; }
+/* Mid widths: drop the least-needed columns */
+@media (max-width: 1199px) {
+  .hx-table th:nth-child(4), .hx-table td:nth-child(4),
+  .hx-table th:nth-child(6), .hx-table td:nth-child(6) { display: none; }
+}
 
-/* Phones: rows become stacked records */
+/* Phones: rows become compact records */
 @media (max-width: 760px) {
-  .s-scope { margin-left: 0; width: 100%; }
-  .date .form-control { width: 100%; }
-  .date { flex: 1 1 140px; }
-  .sales-table thead { display: none; }
-  .sales-table, .sales-table tbody, .sales-table tr, .sales-table td { display: block; width: 100%; }
-  .sales-table tr { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 12px 16px; }
-  .sales-table td { padding: 0 !important; border: 0; }
-  .sales-table td:nth-child(1) { grid-column: 1; }
-  .sales-table td:nth-child(6) { grid-column: 2; grid-row: 1; font-size: 16px; }
-  .sales-table td:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
-  .sales-table td:nth-child(2) .sub { display: inline; margin-left: 6px; }
-  .sales-table td:nth-child(2) span { display: inline; }
-  .sales-table td:nth-child(3), .sales-table td:nth-child(4) { grid-column: 1 / -1; font-size: 13.5px; color: var(--ink-2); }
-  .sales-table td:nth-child(3)::before { content: 'Customer: '; color: var(--ink-3); }
-  .sales-table td:nth-child(4)::before { content: 'Cashier: '; color: var(--ink-3); }
-  .sales-table td:nth-child(5) { grid-column: 1 / -1; max-width: none; margin-top: 4px; }
-  .sales-table td:nth-child(7) { grid-column: 1; margin-top: 8px; align-self: center; }
-  .sales-table td:nth-child(8) { grid-column: 2; grid-row: span 1; margin-top: 6px; }
-  .pager { justify-content: center; }
+  .hx-seg { width: 100%; }
+  .hx-seg a { flex: 1; justify-content: center; padding: 0 6px; }
+  .hx-dates { flex: 1 1 100%; }
+  .hx-dates .form-control { flex: 1; width: auto; }
+  .hx-kpi { flex: 1 1 33%; padding: 8px 12px; }
+  .hx-v { font-size: 17px; }
+  .hx-scope { margin-left: 0; width: 100%; border-top: 1px solid var(--rule); padding: 8px 12px; }
+  .hx-table thead { display: none; }
+  .hx-table, .hx-table tbody { display: block; width: 100%; }
+  .hx-table tr { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 2px 10px; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+  .hx-table tbody td { display: block !important; height: auto; padding: 0 !important; border: 0; max-width: none; }
+  .hx-table td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .hx-table td:nth-child(2) { grid-column: 2; grid-row: 1; }
+  .hx-table td:nth-child(7) { grid-column: 3; grid-row: 1; font-size: 15px; }
+  .hx-table td:nth-child(3) { grid-column: 1 / 3; grid-row: 2; font-size: 13px; }
+  .hx-table td:nth-child(5) { grid-column: 1 / -1; grid-row: 3; white-space: nowrap; }
+  .hx-table td:nth-child(8) { grid-column: 1 / 3; grid-row: 4; margin-top: 4px; }
+  .hx-table td:nth-child(9) { grid-column: 3; grid-row: 2 / 5; align-self: end; }
+  .hx-table td:nth-child(4), .hx-table td:nth-child(6) { display: none !important; }
+  .hx-pager { justify-content: center; }
 }
 </style>
 {% endblock content %}
@@ -171,7 +229,7 @@
 <div class="modal-backdrop" id="refundModal" role="dialog" aria-modal="true" aria-labelledby="refund-title">
   <div class="modal-box">
     <div class="modal-header">
-      <span id="refund-title">Refund sale <span class="fig">#<span id="modalSaleId"></span></span></span>
+      <span id="refund-title">Refund <span class="fig" id="modalSaleId"></span></span>
       <button type="button" class="modal-close" onclick="closeRefundModal()" aria-label="Close"><i class="bi bi-x-lg"></i></button>
     </div>
     <div class="refund-body">
@@ -222,6 +280,7 @@
 const salesData = {
   {% for sale in sales %}
   {{ sale.pk }}: {
+    orNo: "{{ sale.or_display|default:sale.pk|escapejs }}",
     date: "{{ sale.created_at|date:'M d, Y H:i' }}",
     cashier: "{{ sale.cashier|escapejs }}",
     total: "{{ sale.total|floatformat:'2g'|escapejs }}",
@@ -239,7 +298,7 @@ function openRefundModal(saleId) {
   const sale = salesData[saleId];
   if (!sale) return;
   lastFocus = document.activeElement;
-  document.getElementById('modalSaleId').textContent = saleId;
+  document.getElementById('modalSaleId').textContent = sale.orNo;
   document.getElementById('modalSaleMeta').textContent = sale.date + ' · ' + sale.cashier;
   document.getElementById('modalTotal').textContent = sale.total;
   const box = document.getElementById('modalItems');
@@ -264,9 +323,9 @@ function closeRefundModal() {
   document.body.style.overflow = '';
   if (lastFocus) lastFocus.focus();
 }
-function openReceiptModal(saleId) {
+function openReceiptModal(url) {
   lastFocus = document.activeElement;
-  document.getElementById('receiptFrame').src = "{% url 'sales:receipt' 0 %}".replace('/0/', '/' + saleId + '/');
+  document.getElementById('receiptFrame').src = url;
   document.getElementById('receiptModal').classList.add('open');
   document.body.style.overflow = 'hidden';
   document.querySelector('#receiptModal .btn-primary').focus();

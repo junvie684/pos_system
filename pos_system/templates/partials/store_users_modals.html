@@ -1,0 +1,157 @@
+{% comment %} Add / edit / reset-password / remove pop-ups for the users table. Needs: tenant. {% endcomment %}
+{# ── Add user ── #}
+<div class="modal-backdrop" id="modal-add" role="dialog" aria-modal="true" aria-labelledby="add-h">
+  <div class="modal-box user-box">
+    <div class="modal-header">
+      <span class="modal-title" id="add-h">Add user to {{ tenant.name }}</span>
+      <button type="button" class="modal-close" onclick="closeModal('modal-add')" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="modal-body">
+      <div id="add-alert" class="alert alert-error" style="display:none"><i class="bi bi-x-circle" aria-hidden="true"></i> <span id="add-alert-msg"></span></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label" for="add-first-name">First name</label><input type="text" id="add-first-name" class="form-control"></div>
+        <div class="form-group"><label class="form-label" for="add-last-name">Last name</label><input type="text" id="add-last-name" class="form-control"></div>
+        <div class="form-group"><label class="form-label" for="add-username">Username</label><input type="text" id="add-username" class="form-control" autocomplete="off" required></div>
+        <div class="form-group"><label class="form-label" for="add-email">Email <span class="opt">optional</span></label><input type="email" id="add-email" class="form-control" autocomplete="off"></div>
+        <div class="form-group">
+          <label class="form-label" for="add-role">Role</label>
+          <select id="add-role" class="form-control" onchange="syncPermissions('add')">
+            <option value="cashier">Cashier</option><option value="manager">Manager</option><option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="form-group"><span class="form-label">Status</span><label class="check"><input type="checkbox" id="add-is-active" checked> Active</label></div>
+      </div>
+      <fieldset class="form-group access">
+        <legend class="form-label">Menu access</legend>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="add-perm-products" value="1"> Products</label>
+          <label class="check"><input type="checkbox" id="add-perm-categories" value="1"> Categories</label>
+          <label class="check"><input type="checkbox" id="add-perm-reports" value="1"> Reports</label>
+          <label class="check"><input type="checkbox" id="add-perm-users" value="1"> User management</label>
+          <label class="check"><input type="checkbox" id="add-perm-pending" value="1"> Held sales</label>
+          <label class="check"><input type="checkbox" id="add-perm-shift" value="1"> Cash closing report</label>
+        </div>
+      </fieldset>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label" for="add-pw1">Password</label>
+          <div class="pw-field"><input type="password" id="add-pw1" class="form-control" autocomplete="new-password"><button type="button" class="pw-eye" onclick="togglePw('add-pw1',this)" aria-label="Show password"><i class="bi bi-eye"></i></button></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="add-pw2">Confirm password</label>
+          <div class="pw-field"><input type="password" id="add-pw2" class="form-control" autocomplete="new-password"><button type="button" class="pw-eye" onclick="togglePw('add-pw2',this)" aria-label="Show password"><i class="bi bi-eye"></i></button></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add')">Cancel</button>
+      <button type="button" class="btn btn-primary" id="add-btn" onclick="submitAdd()">Create user</button>
+    </div>
+  </div>
+</div>
+
+{# ── Edit user ── #}
+<div class="modal-backdrop" id="modal-edit" role="dialog" aria-modal="true" aria-labelledby="edit-h">
+  <div class="modal-box user-box">
+    <div class="modal-header">
+      <span class="modal-title" id="edit-h">Edit <span id="edit-title"></span></span>
+      <button type="button" class="modal-close" onclick="closeModal('modal-edit')" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-pk"><input type="hidden" id="edit-url">
+      <div id="edit-alert" class="alert alert-error" style="display:none"><i class="bi bi-x-circle" aria-hidden="true"></i> <span id="edit-alert-msg"></span></div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label" for="edit-first-name">First name</label><input type="text" id="edit-first-name" class="form-control"></div>
+        <div class="form-group"><label class="form-label" for="edit-last-name">Last name</label><input type="text" id="edit-last-name" class="form-control"></div>
+        <div class="form-group"><label class="form-label" for="edit-username">Username</label><input type="text" id="edit-username" class="form-control" autocomplete="off"></div>
+        <div class="form-group"><label class="form-label" for="edit-email">Email</label><input type="email" id="edit-email" class="form-control" autocomplete="off"></div>
+        <div class="form-group">
+          <label class="form-label" for="edit-role">Role</label>
+          <select id="edit-role" class="form-control" onchange="syncPermissions('edit')">
+            <option value="cashier">Cashier</option><option value="manager">Manager</option><option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="form-group"><span class="form-label">Status</span><label class="check"><input type="checkbox" id="edit-is-active"> Active</label></div>
+      </div>
+      <fieldset class="form-group access">
+        <legend class="form-label">Menu access</legend>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="edit-perm-products" value="1"> Products</label>
+          <label class="check"><input type="checkbox" id="edit-perm-categories" value="1"> Categories</label>
+          <label class="check"><input type="checkbox" id="edit-perm-reports" value="1"> Reports</label>
+          <label class="check"><input type="checkbox" id="edit-perm-users" value="1"> User management</label>
+          <label class="check"><input type="checkbox" id="edit-perm-pending" value="1"> Held sales</label>
+          <label class="check"><input type="checkbox" id="edit-perm-shift" value="1"> Cash closing report</label>
+        </div>
+      </fieldset>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('modal-edit')">Cancel</button>
+      <button type="button" class="btn btn-primary" id="edit-btn" onclick="submitEdit()">Save changes</button>
+    </div>
+  </div>
+</div>
+
+{# ── Reset password ── #}
+<div class="modal-backdrop" id="modal-pw" role="dialog" aria-modal="true" aria-labelledby="pw-h">
+  <div class="modal-box small-box">
+    <div class="modal-header">
+      <span class="modal-title" id="pw-h">Reset password for <span id="pw-title"></span></span>
+      <button type="button" class="modal-close" onclick="closeModal('modal-pw')" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="pw-url">
+      <div id="pw-alert" class="alert alert-error" style="display:none"><i class="bi bi-x-circle" aria-hidden="true"></i> <span id="pw-alert-msg"></span></div>
+      <div class="form-group">
+        <label class="form-label" for="pw-new1">New password</label>
+        <div class="pw-field"><input type="password" id="pw-new1" class="form-control" autocomplete="new-password"><button type="button" class="pw-eye" onclick="togglePw('pw-new1',this)" aria-label="Show password"><i class="bi bi-eye"></i></button></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="pw-new2">Confirm new password</label>
+        <div class="pw-field"><input type="password" id="pw-new2" class="form-control" autocomplete="new-password"><button type="button" class="pw-eye" onclick="togglePw('pw-new2',this)" aria-label="Show password"><i class="bi bi-eye"></i></button></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('modal-pw')">Cancel</button>
+      <button type="button" class="btn btn-primary" id="pw-btn" onclick="submitPw()">Set new password</button>
+    </div>
+  </div>
+</div>
+
+{# ── Remove user ── #}
+<div class="modal-backdrop" id="modal-del" role="dialog" aria-modal="true" aria-labelledby="del-h">
+  <div class="modal-box small-box">
+    <div class="modal-header">
+      <span class="modal-title" id="del-h">Remove user</span>
+      <button type="button" class="modal-close" onclick="closeModal('modal-del')" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="del-pk"><input type="hidden" id="del-url">
+      <div id="del-alert" class="alert alert-error" style="display:none"><i class="bi bi-x-circle" aria-hidden="true"></i> <span id="del-alert-msg"></span></div>
+      <p class="modal-text">Remove <strong id="del-username"></strong> from {{ tenant.name }}? Their account is deleted and they can no longer sign in. Sales they rang up stay in the reports.</p>
+      <p class="danger-note"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> This can't be undone.</p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeModal('modal-del')">Cancel</button>
+      <button type="button" class="btn btn-danger" id="del-btn" onclick="submitDel()"><i class="bi bi-trash" aria-hidden="true"></i> Remove user</button>
+    </div>
+  </div>
+</div>
+<style>
+.user-box { max-width: 600px; }
+.small-box { max-width: 440px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.opt { font-weight: 400; color: var(--ink-3); margin-left: 4px; }
+.access { border: 0; }
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+.check { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 12px; border: 1px solid var(--rule); border-radius: var(--radius); font-size: 14px; color: var(--ink); cursor: pointer; }
+.check:hover { background: var(--paper-2); }
+.check input { width: 18px; height: 18px; accent-color: var(--ink); }
+.pw-field { position: relative; }
+.pw-field .form-control { padding-right: 46px; }
+.pw-eye { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border: 0; border-radius: var(--radius); background: none; color: var(--ink-2); cursor: pointer; }
+.pw-eye:hover { background: var(--paper-2); color: var(--ink); }
+.danger-note { display: flex; gap: 8px; align-items: center; margin: 12px 0; padding: 10px 12px; border-radius: var(--radius); background: var(--red-tint); color: var(--red-ink-deep); font-size: 13.5px; font-weight: 600; }
+.modal-footer { justify-content: flex-end; }
+@media (max-width: 600px) { .form-grid, .checks { grid-template-columns: 1fr; } }
+</style>

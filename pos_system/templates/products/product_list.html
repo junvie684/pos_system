@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Products — POS{% endblock %}
-{% block page_title %}Products{% endblock %}
+{% block page_title %}Records{% endblock %}
 
 {% block topbar_actions %}
   {% if show_inactive %}
@@ -18,34 +18,34 @@
 {% endblock %}
 
 {% block content %}
+<div class="card rx-box">
+{% include 'partials/records_tabs.html' %}
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<div class="prod-bar">
-  <form method="get" id="search-form" class="search" role="search">
+<div class="rx-toolbar">
+  <form method="get" id="search-form" class="rx-search" role="search">
     <i class="bi bi-search" aria-hidden="true"></i>
     <label for="search-input" class="sr-only">Search products</label>
-    <input type="text" name="q" id="search-input" class="form-control" placeholder="Search by name or category" value="{{ search }}" oninput="debounceSearch()" autocomplete="off">
+    <input type="text" name="q" id="search-input" class="form-control" placeholder="Search name or category" value="{{ search }}" oninput="debounceSearch()" autocomplete="off">
     {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
     {% if stock_filter %}<input type="hidden" name="stock" value="{{ stock_filter }}">{% endif %}
   </form>
 
   {% if not show_inactive %}
-  <div class="stock-chips" role="group" aria-label="Filter by stock">
-    <a class="chip{% if not stock_filter %} is-on{% endif %}" href="?{% if search %}q={{ search|urlencode }}{% endif %}"{% if not stock_filter %} aria-current="true"{% endif %}>All <span class="fig" id="chip-all">{{ all_count }}</span></a>
-    <a class="chip{% if stock_filter == 'low' or stock_filter == 'attention' %} is-on{% endif %}" href="?stock=low{% if search %}&q={{ search|urlencode }}{% endif %}"{% if stock_filter == 'low' %} aria-current="true"{% endif %}>Low stock <span class="fig" id="chip-low">{{ low_count }}</span></a>
-    <a class="chip{% if stock_filter == 'out' or stock_filter == 'attention' %} is-on{% endif %}" href="?stock=out{% if search %}&q={{ search|urlencode }}{% endif %}"{% if stock_filter == 'out' %} aria-current="true"{% endif %}>Out of stock <span class="fig" id="chip-out">{{ out_count }}</span></a>
+  <div class="rx-seg" role="group" aria-label="Filter by stock">
+    <a class="{% if not stock_filter %}is-on{% endif %}" href="?{% if search %}q={{ search|urlencode }}{% endif %}"{% if not stock_filter %} aria-current="true"{% endif %}>All <span class="fig" id="chip-all">{{ all_count }}</span></a>
+    <a class="{% if stock_filter == 'low' or stock_filter == 'attention' %}is-on{% endif %}" href="?stock=low{% if search %}&q={{ search|urlencode }}{% endif %}"{% if stock_filter == 'low' %} aria-current="true"{% endif %}>Low stock <span class="fig" id="chip-low">{{ low_count }}</span></a>
+    <a class="{% if stock_filter == 'out' or stock_filter == 'attention' %}is-on{% endif %}" href="?stock=out{% if search %}&q={{ search|urlencode }}{% endif %}"{% if stock_filter == 'out' %} aria-current="true"{% endif %}>Out of stock <span class="fig" id="chip-out">{{ out_count }}</span></a>
   </div>
   {% endif %}
+
+  <span class="rx-count"><span class="fig" id="product-count">{{ products.paginator.count }}</span> {% if show_inactive %}inactive {% elif stock_filter == 'low' %}low-stock {% elif stock_filter == 'out' %}out-of-stock {% endif %}product<span id="product-count-s">{{ products.paginator.count|pluralize }}</span></span>
 </div>
 
-<div class="card table-card">
-  <div class="table-head">
-    <h2>{% if show_inactive %}Inactive products{% elif stock_filter == 'attention' %}Low or out of stock{% elif stock_filter == 'low' %}Low stock{% elif stock_filter == 'out' %}Out of stock{% else %}All products{% endif %}</h2>
-    <span class="count"><span class="fig" id="product-count">{{ products.paginator.count }}</span> product<span id="product-count-s">{{ products.paginator.count|pluralize }}</span></span>
-  </div>
+<div class="table-card rx-card">
   <div class="table-wrap">
-    <table class="prod-table">
+    <table class="rx-table prod-table">
       <thead>
         <tr>
           <th scope="col">Product</th>
@@ -59,11 +59,11 @@
         {% for p in products %}
         <tr id="product-row-{{ p.pk }}" data-barcode="{{ p.barcode|default:'' }}" data-stock="{{ p.stock }}" data-price="{{ p.price }}" data-active="{{ p.is_active|yesno:'1,0' }}">
           <td>
-            <span class="strong row-name">{{ p.name }}</span>
-            <span class="row-code fig">{{ p.barcode|default:"No barcode" }}</span>
+            <span class="rx-name row-name">{{ p.name }}</span>
+            <span class="rx-sub row-code">{{ p.barcode|default:"No barcode" }}</span>
           </td>
           <td class="row-category">{{ p.category|default:"—" }}</td>
-          <td class="strong fig num row-price">₱{{ p.price }}</td>
+          <td class="fig num row-price">₱{{ p.price }}</td>
           <td class="row-stock">
             {% if not p.is_active %}
               <span class="badge badge-red">Inactive</span>
@@ -75,28 +75,22 @@
             {% endif %}
           </td>
           <td>
-            <div class="row-actions">
+            <div class="rx-actions">
               {% if show_inactive %}
                 <button type="button" class="btn btn-ghost btn-sm" onclick="reactivateProduct({{ p.pk }})">
                   <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Reactivate
                 </button>
               {% else %}
-                <button type="button" class="btn btn-ghost btn-sm" onclick="openEditModal({{ p.pk }})">
-                  <i class="bi bi-pencil" aria-hidden="true"></i> Edit
-                </button>
-                <a href="{% url 'products:product_history' p.pk %}" class="btn btn-ghost btn-sm icon-btn" aria-label="Stock history for {{ p.name }}" title="Stock history">
-                  <i class="bi bi-clock-history" aria-hidden="true"></i>
-                </a>
-                <button type="button" class="btn btn-ghost btn-sm icon-btn danger-icon" onclick="openDelModal({{ p.pk }})" aria-label="Delete {{ p.name }}" title="Delete">
-                  <i class="bi bi-trash" aria-hidden="true"></i>
-                </button>
+                <button type="button" class="rx-icon" onclick="openEditModal({{ p.pk }})" aria-label="Edit {{ p.name }}" title="Edit"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                <a href="{% url 'products:product_history' p.pk %}" class="rx-icon" aria-label="Stock history for {{ p.name }}" title="Stock history"><i class="bi bi-clock-history" aria-hidden="true"></i></a>
+                <button type="button" class="rx-icon is-danger" onclick="openDelModal({{ p.pk }})" aria-label="Delete {{ p.name }}" title="Delete"><i class="bi bi-trash" aria-hidden="true"></i></button>
               {% endif %}
             </div>
           </td>
         </tr>
         {% empty %}
         <tr id="empty-row">
-          <td colspan="5" class="empty-cell">
+          <td colspan="5" class="rx-empty">
             <i class="bi bi-box-seam" aria-hidden="true"></i>
             {% if search %}No products match “{{ search }}”.
             {% elif stock_filter == 'attention' %}Everything is stocked.
@@ -111,14 +105,13 @@
     </table>
   </div>
 
-  {% if products.paginator.num_pages > 1 %}
-  <nav class="pager" aria-label="Pages">
-    <span class="pager-info">
-      <b class="fig">{{ products.start_index }}–{{ products.end_index }}</b> of <span class="fig">{{ products.paginator.count }}</span>
-    </span>
+  {% if products.paginator.count %}
+  <nav class="rx-foot" aria-label="Pages">
+    <span>Showing <b class="fig">{{ products.start_index }}–{{ products.end_index }}</b> of <span class="fig">{{ products.paginator.count }}</span></span>
+    {% if products.paginator.num_pages > 1 %}
     <div class="pager-links">
       {% if products.has_previous %}
-        <a class="btn btn-ghost btn-sm" href="?page={{ products.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if stock_filter %}&stock={{ stock_filter }}{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}"><i class="bi bi-chevron-left" aria-hidden="true"></i> Prev</a>
+        <a class="pg" href="?page={{ products.previous_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if stock_filter %}&stock={{ stock_filter }}{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}" aria-label="Previous page"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
       {% endif %}
       {% for num in products.paginator.page_range %}
         {% if num == products.number %}
@@ -131,69 +124,29 @@
         {% endif %}
       {% endfor %}
       {% if products.has_next %}
-        <a class="btn btn-ghost btn-sm" href="?page={{ products.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if stock_filter %}&stock={{ stock_filter }}{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}">Next <i class="bi bi-chevron-right" aria-hidden="true"></i></a>
+        <a class="pg" href="?page={{ products.next_page_number }}{% if search %}&q={{ search|urlencode }}{% endif %}{% if stock_filter %}&stock={{ stock_filter }}{% endif %}{% if show_inactive %}&show_inactive=1{% endif %}" aria-label="Next page"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>
       {% endif %}
     </div>
+    {% endif %}
   </nav>
   {% endif %}
 </div>
+</div>
 
 <style>
-.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
-.prod-bar { display: flex; gap: 12px 16px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
-.search { position: relative; flex: 1 1 280px; max-width: 420px; }
-.search .bi { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
-.search .form-control { padding-left: 36px; }
-.stock-chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.chip { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border: 1px solid var(--chip-rule); border-radius: var(--radius); background: var(--panel); color: var(--ink); font-size: 14px; font-weight: 600; text-decoration: none; transition: background-color .12s, border-color .12s; }
-.chip .fig { font-size: 12.5px; color: var(--ink-3); }
-.chip:hover { background: var(--paper-2); border-color: var(--rule-strong); }
-.chip.is-on { background: var(--ink); border-color: var(--ink); color: #fff; }
-.chip.is-on .fig { color: var(--rail-ink-muted); }
-
-.table-card { padding: 0; overflow: hidden; }
-.table-head { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 20px 12px; }
-.table-head h2 { font-size: 16px; font-weight: 700; }
-.count { font-size: 13px; color: var(--ink-3); }
-.prod-table th:first-child, .prod-table td:first-child { padding-left: 20px; }
-.prod-table th:last-child, .prod-table td:last-child { padding-right: 20px; }
-.num { text-align: right; }
-.row-name { display: block; color: var(--ink); font-weight: 600; }
-.row-code { display: block; font-size: 12px; color: var(--ink-3); margin-top: 1px; }
-.stock { display: grid; grid-template-columns: 40px 120px; align-items: center; gap: 10px; }
-.stock-num { font-size: 14px; font-weight: 700; color: var(--ink); }
-.stock-track { display: block; height: 8px; background: var(--paper-2); border-radius: 4px; overflow: hidden; }
-.stock-bar { display: block; height: 100%; min-width: 2px; background: var(--ink-2); border-radius: 0 4px 4px 0; }
+.prod-table .row-name { display: block; }
+.prod-table .row-price { color: var(--ink); font-weight: 700; font-size: 14px; }
+.prod-table .row-category { color: var(--ink-2); }
+.stock { display: grid; grid-template-columns: 36px 110px; align-items: center; gap: 10px; }
+.stock-num { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.stock-track { display: block; height: 6px; background: var(--paper-2); overflow: hidden; }
+.stock-bar { display: block; height: 100%; min-width: 2px; background: var(--ink-2); }
 .stock.is-low .stock-num { color: var(--amber-ink); }
 .stock.is-low .stock-bar { background: var(--amber-mark); }
 .stock.is-out .stock-num { color: var(--red); }
 .stock.is-out .stock-bar { width: 0 !important; }
-.row-actions { display: flex; gap: 6px; justify-content: flex-end; }
-.icon-btn { width: 36px; padding: 0; }
-.danger-icon:hover { background: var(--red-tint); color: var(--red-ink); border-color: var(--red-rule); }
-.empty-cell { text-align: center; padding: 48px 16px !important; color: var(--ink-3); }
-.empty-cell .bi { display: block; font-size: 24px; color: var(--rule-strong); margin-bottom: 8px; }
-
-.pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--rule); }
-.pager-info { font-size: 13.5px; color: var(--ink-2); }
 .pager-links { display: flex; gap: 4px; align-items: center; }
-.pg { min-width: 36px; height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); font-size: 13px; font-weight: 700; color: var(--ink); text-decoration: none; }
-.pg:hover { background: var(--paper-2); }
-.pg.is-on { background: var(--ink); color: #fff; }
 .pg-gap { color: var(--ink-3); padding: 0 2px; }
-
-.toast {
-  position: fixed; left: 50%; bottom: 24px; z-index: 9999;
-  transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
-  display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: var(--radius);
-  background: var(--ink); color: #fff; font-size: 14px; font-weight: 600;
-  box-shadow: 0 8px 24px rgba(30,36,48,.25); max-width: calc(100vw - 32px);
-  transition: transform .22s var(--ease-out), opacity .22s var(--ease-out);
-}
-.toast.show { transform: translate(-50%, 0); opacity: 1; }
-.toast.success .bi { color: #7BD3A0; }
-.toast.warning .bi { color: #F2C46B; }
-.toast.error { background: var(--red); }
 
 @media (max-width: 600px) {
   .hide-sm { display: none; }
@@ -201,17 +154,17 @@
   .topbar-actions .btn { padding: 0 12px; }
 }
 @media (max-width: 760px) {
-  .search { max-width: none; }
   .prod-table thead { display: none; }
-  .prod-table, .prod-table tbody, .prod-table tr, .prod-table td { display: block; width: 100%; }
-  .prod-table tr { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px 16px; }
-  .prod-table td { padding: 0 !important; border: 0; }
-  .prod-table td:nth-child(1) { grid-column: 1; }
-  .prod-table td:nth-child(2) { grid-column: 1; font-size: 13.5px; }
-  .prod-table td:nth-child(3) { grid-column: 2; grid-row: 1; font-size: 16px; }
-  .prod-table td:nth-child(4) { grid-column: 1; margin-top: 6px; }
-  .prod-table td:nth-child(5) { grid-column: 2; grid-row: 2 / span 2; align-self: end; }
-  .stock { grid-template-columns: 40px 96px; }
+  .prod-table, .prod-table tbody { display: block; width: 100%; }
+  .prod-table tr { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; padding: 10px 12px; border-bottom: 1px solid var(--rule); }
+  .prod-table tbody td { display: block; height: auto; padding: 0 !important; border: 0; white-space: normal; }
+  .prod-table td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .prod-table td:nth-child(3) { grid-column: 2; grid-row: 1; font-size: 15px; }
+  .prod-table td:nth-child(2) { grid-column: 1; grid-row: 2; font-size: 13px; }
+  .prod-table td:nth-child(4) { grid-column: 1; grid-row: 3; margin-top: 4px; }
+  .prod-table td:nth-child(5) { grid-column: 2; grid-row: 2 / 4; align-self: end; }
+  .prod-table td.rx-empty { grid-column: 1 / -1; grid-row: auto; }
+  .stock { grid-template-columns: 36px 96px; }
 }
 </style>
 {% endblock content %}
@@ -246,13 +199,9 @@
           <input type="number" id="add-stock" class="form-control fig" placeholder="0" min="0" inputmode="numeric">
         </div>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="margin-bottom:0;">
         <label class="form-label" for="add-barcode">Barcode</label>
         <input type="text" id="add-barcode" class="form-control fig" placeholder="Scan or type the barcode">
-      </div>
-      <div class="form-group" style="margin-bottom:0;">
-        <label class="form-label" for="add-image">Product image</label>
-        <input type="file" id="add-image" class="form-control" accept="image/*">
       </div>
     </div>
     <div class="modal-footer">
@@ -292,13 +241,9 @@
           <input type="number" id="edit-stock" class="form-control fig" min="0" inputmode="numeric">
         </div>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="margin-bottom:0;">
         <label class="form-label" for="edit-barcode">Barcode</label>
         <input type="text" id="edit-barcode" class="form-control fig" placeholder="Scan or type the barcode">
-      </div>
-      <div class="form-group" style="margin-bottom:0;">
-        <label class="form-label" for="edit-image">Replace image</label>
-        <input type="file" id="edit-image" class="form-control" accept="image/*">
       </div>
     </div>
     <div class="modal-footer">
@@ -327,22 +272,10 @@
   </div>
 </div>
 
-<style>
-.modal-body { padding: 18px 20px; }
-.modal-footer { justify-content: flex-end; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.req { font-weight: 400; color: var(--ink-3); margin-left: 4px; font-size: 12px; }
-.del-q { font-size: 16px; }
-.del-note { font-size: 14px; color: var(--ink-2); margin-top: 6px; }
-</style>
 
 <script>
 // ── CSRF ──────────────────────────────────────────────
-function getCookie(name) {
-  const match = document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith(name + '='));
-  return match ? decodeURIComponent(match.substring(name.length + 1)) : null;
-}
-const CSRF = getCookie('csrftoken');
+const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
 // ── Modals ────────────────────────────────────────────
 let lastFocus = null;
@@ -480,7 +413,7 @@ function debounceSearch() {
 
 // ── Add ───────────────────────────────────────────────
 function resetAddForm() {
-  ['add-name', 'add-price', 'add-stock', 'add-barcode', 'add-category', 'add-image'].forEach(id => { document.getElementById(id).value = ''; });
+  ['add-name', 'add-price', 'add-stock', 'add-barcode', 'add-category'].forEach(id => { document.getElementById(id).value = ''; });
   clearModalAlert('add');
 }
 
@@ -494,8 +427,6 @@ async function submitAdd() {
     fd.append('price', document.getElementById('add-price').value);
     fd.append('stock', document.getElementById('add-stock').value);
     fd.append('barcode', document.getElementById('add-barcode').value);
-    const img = document.getElementById('add-image').files[0];
-    if (img) fd.append('image', img);
     const data = await postForm('/products/add/', fd);
     if (data.success) {
       closeModal('modal-add');
@@ -514,14 +445,14 @@ async function submitAdd() {
 }
 
 function rowHtml(p) {
-  return '<td><span class="strong row-name">' + escapeHtml(p.name) + '</span><span class="row-code fig">' + escapeHtml(p.barcode || 'No barcode') + '</span></td>'
+  return '<td><span class="rx-name row-name">' + escapeHtml(p.name) + '</span><span class="rx-sub row-code">' + escapeHtml(p.barcode || 'No barcode') + '</span></td>'
     + '<td class="row-category">' + escapeHtml(p.category || '—') + '</td>'
-    + '<td class="strong fig num row-price">₱' + escapeHtml(p.price) + '</td>'
+    + '<td class="fig num row-price">₱' + escapeHtml(p.price) + '</td>'
     + '<td class="row-stock">' + stockCell(parseInt(p.stock) || 0, p.is_active) + '</td>'
-    + '<td><div class="row-actions">'
-    +   '<button type="button" class="btn btn-ghost btn-sm" onclick="openEditModal(' + p.pk + ')"><i class="bi bi-pencil" aria-hidden="true"></i> Edit</button>'
-    +   '<a href="/products/' + p.pk + '/history/" class="btn btn-ghost btn-sm icon-btn" aria-label="Stock history for ' + escapeHtml(p.name) + '" title="Stock history"><i class="bi bi-clock-history" aria-hidden="true"></i></a>'
-    +   '<button type="button" class="btn btn-ghost btn-sm icon-btn danger-icon" onclick="openDelModal(' + p.pk + ')" aria-label="Delete ' + escapeHtml(p.name) + '" title="Delete"><i class="bi bi-trash" aria-hidden="true"></i></button>'
+    + '<td><div class="rx-actions">'
+    +   '<button type="button" class="rx-icon" onclick="openEditModal(' + p.pk + ')" aria-label="Edit ' + escapeHtml(p.name) + '" title="Edit"><i class="bi bi-pencil" aria-hidden="true"></i></button>'
+    +   '<a href="/products/' + p.pk + '/history/" class="rx-icon" aria-label="Stock history for ' + escapeHtml(p.name) + '" title="Stock history"><i class="bi bi-clock-history" aria-hidden="true"></i></a>'
+    +   '<button type="button" class="rx-icon is-danger" onclick="openDelModal(' + p.pk + ')" aria-label="Delete ' + escapeHtml(p.name) + '" title="Delete"><i class="bi bi-trash" aria-hidden="true"></i></button>'
     + '</div></td>';
 }
 
@@ -558,7 +489,6 @@ function openEditModal(pk) {
   document.getElementById('edit-price').value = row.dataset.price || '';
   document.getElementById('edit-stock').value = row.dataset.stock || 0;
   document.getElementById('edit-barcode').value = row.dataset.barcode || '';
-  document.getElementById('edit-image').value = '';
   clearModalAlert('edit');
   openModal('modal-edit');
 }
@@ -574,8 +504,6 @@ async function submitEdit() {
     fd.append('price', document.getElementById('edit-price').value);
     fd.append('stock', document.getElementById('edit-stock').value);
     fd.append('barcode', document.getElementById('edit-barcode').value);
-    const img = document.getElementById('edit-image').files[0];
-    if (img) fd.append('image', img);
     const data = await postForm('/products/edit/' + pk + '/', fd);
     if (data.success) {
       closeModal('modal-edit');

@@ -1,1 +1,1 @@
-web: python manage.py migrate --noinput && python manage.py createcachetable && python manage.py collectstatic --noinput && gunicorn pos_system.wsgi --log-file -
+web: python manage.py migrate --noinput && python manage.py createcachetable && (python manage.py setup_archive_db || echo 'WARNING: archive database not ready; archiving is paused') && python manage.py collectstatic --noinput && gunicorn pos_system.wsgi --log-file -

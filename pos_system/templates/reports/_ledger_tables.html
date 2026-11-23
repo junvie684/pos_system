@@ -1,0 +1,92 @@
+{# Sales made + refunds given for a period. Used by the daily and monthly reports. #}
+{# Needs: sales (page), refunds, refund_count, when_format, pager_query #}
+{% if archive_unavailable %}
+<div class="alert alert-warning ledger-note" role="status">
+  <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+  <span>The archive database isn't reachable, so sales older than the retention period are missing from these figures.</span>
+</div>
+{% endif %}
+<section class="card table-card ledger-card" aria-labelledby="made-h">
+  <div class="sec-head">
+    <div>
+      <h2 id="made-h">Sales made</h2>
+      <p class="panel-sub">Sales refunded later still count here, on the day they were made.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="ledger-table rec-table">
+      <thead>
+        <tr><th scope="col">OR No.</th><th scope="col">When</th><th scope="col">Customer</th><th scope="col">Cashier</th><th scope="col">Payment</th><th scope="col" class="num">Total</th><th scope="col"><span class="sr-only">Status</span></th></tr>
+      </thead>
+      <tbody>
+        {% for sale in sales %}
+        <tr>
+          <td class="rec-title serial-cell">{{ sale.or_display|default:"—" }} <span class="rec-id">ID {{ sale.pk }}</span></td>
+          <td class="rec-meta fig when">{{ sale.created_at|date:when_format }}</td>
+          <td class="rec-meta">{{ sale.customer|default:"Walk-in" }}</td>
+          <td class="rec-meta">{{ sale.cashier }}</td>
+          <td class="rec-meta">{{ sale.get_payment_method_display }}</td>
+          <td class="rec-total num fig strong">₱{{ sale.total|floatformat:"2g" }}</td>
+          <td class="rec-foot">{% if sale.status == 'refunded' %}<span class="badge badge-red">Refunded</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="empty-cell"><i class="bi bi-receipt" aria-hidden="true"></i>No sales in this period.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if sales.has_other_pages %}
+  <nav class="pager" aria-label="Pages">
+    <span class="pager-info">Page <b class="fig">{{ sales.number }}</b> of <span class="fig">{{ sales.paginator.num_pages }}</span></span>
+    <div class="pager-links">
+      {% if sales.has_previous %}<a class="btn btn-ghost btn-sm" href="?{{ pager_query }}&page={{ sales.previous_page_number }}"><i class="bi bi-chevron-left" aria-hidden="true"></i> Prev</a>{% endif %}
+      {% for num in sales.paginator.page_range %}
+        {% if sales.number == num %}<span class="pg is-on" aria-current="page">{{ num }}</span>
+        {% elif num >= sales.number|add:"-2" and num <= sales.number|add:"2" %}<a class="pg" href="?{{ pager_query }}&page={{ num }}">{{ num }}</a>{% endif %}
+      {% endfor %}
+      {% if sales.has_next %}<a class="btn btn-ghost btn-sm" href="?{{ pager_query }}&page={{ sales.next_page_number }}">Next <i class="bi bi-chevron-right" aria-hidden="true"></i></a>{% endif %}
+    </div>
+  </nav>
+  {% endif %}
+</section>
+
+{% if refunds %}
+<section class="card table-card ledger-card" aria-labelledby="refunds-h">
+  <div class="sec-head">
+    <div>
+      <h2 id="refunds-h">Refunds given <span class="fig count">{{ refund_count }}</span></h2>
+      <p class="panel-sub">Money returned in this period, whenever the sale was made.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="ledger-table rec-table">
+      <thead>
+        <tr><th scope="col">OR No.</th><th scope="col">Refunded</th><th scope="col">Originally sold</th><th scope="col">Refunded by</th><th scope="col">Payment</th><th scope="col" class="num">Amount</th><th scope="col"><span class="sr-only">Status</span></th></tr>
+      </thead>
+      <tbody>
+        {% for sale in refunds %}
+        <tr>
+          <td class="rec-title serial-cell">{{ sale.or_display|default:"—" }} <span class="rec-id">ID {{ sale.pk }}</span></td>
+          <td class="rec-meta fig when">{{ sale.refund_time|date:"M d, H:i" }}</td>
+          <td class="rec-meta fig when">{{ sale.created_at|date:"M d, Y" }}</td>
+          <td class="rec-meta">{{ sale.refunded_by|default:sale.cashier }}</td>
+          <td class="rec-meta">{{ sale.get_payment_method_display }}</td>
+          <td class="rec-total num fig strong neg">− ₱{{ sale.total|floatformat:"2g" }}</td>
+          <td class="rec-foot"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<style>
+.ledger-card + .ledger-card { margin-top: 16px; }
+.ledger-note { margin-bottom: 14px; }
+.ledger-table .when { font-size: 13.5px; white-space: nowrap; }
+.ledger-table td.strong { color: var(--ink); font-weight: 700; }
+.ledger-table td.neg { color: var(--red-ink); }
+.count { font-size: 12.5px; color: var(--ink-3); margin-left: 6px; }
+</style>

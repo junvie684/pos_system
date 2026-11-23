@@ -42,7 +42,7 @@ def product_list(request):
 
     max_stock = Product.objects.filter(is_active=True).aggregate(m=Max('stock'))['m'] or 1
 
-    paginator = Paginator(products, 13)
+    paginator = Paginator(products, 25)
     page_obj = paginator.get_page(request.GET.get('page'))
     categories = Category.objects.order_by('name')
 
@@ -258,9 +258,12 @@ def product_sales_history(request, product_id):
         for entry in history:
             entry['label'] = entry['period'].strftime('%b %d, %Y')
 
-    # Calculate averages per row
+    # Calculate averages per row, and each period's bar height for the chart
     for entry in history:
         entry['avg_per_sale'] = entry['units_sold'] / entry['transactions'] if entry['transactions'] > 0 else 0
+    peak_units = max((entry['units_sold'] or 0 for entry in history), default=0) or 1
+    for entry in history:
+        entry['pct'] = round((entry['units_sold'] or 0) / peak_units * 100, 1)
 
     # Totals
     totals = items.aggregate(

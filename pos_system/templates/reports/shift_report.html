@@ -1,808 +1,303 @@
 {% extends 'base.html' %}
 {% block title %}Cash Closing Report — POS{% endblock %}
 {% block page_title %}Cash Closing Report{% endblock %}
-
+{% block topbar_actions %}
+<button type="button" onclick="printShiftReport()" class="btn btn-ghost"><i class="bi bi-printer" aria-hidden="true"></i> <span class="btn-text">Print slip</span></button>
+{% endblock %}
 {% block content %}
-<div class="container-fluid py-4">
 
-  <!-- Header -->
-    <div class="d-flex justify-content-between align-items-start mb-4 no-print">
-      <div>
-        <h2 class="mb-0 fw-bold">
-          <i class="bi bi-cash-stack text-success me-2"></i>
-          Cash Closing Report
-        </h2>
-        <p class="text-muted mb-0 mt-1">{{ date_label }} · {{ transaction_count }} transactions</p>
-      </div>
-    </div><br>
-
-    <!-- Filters -->
-<div class="card border-0 shadow-sm mb-4 no-print" style="border-radius: 12px;">
-    <div class="card-body p-4">
-      <form method="get" class="filter-grid">
-        <div class="filter-item">
-          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Date</label>
-          <input type="date" name="day" class="form-control form-control-dark"
-                 value="{{ selected_date }}" max="{{ today|date:'Y-m-d' }}">
-        </div>
-        <div class="filter-item">
-          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Cashier</label>
-          {% if is_admin %}
-          <select name="cashier" class="form-select form-select-dark h-100">
-            <option value="">All Cashiers</option>
-            {% for c in cashiers %}
-            <option value="{{ c.pk }}" {% if selected_cashier == c.pk|stringformat:"s" %}selected{% endif %}>
-              {{ c.username }}
-            </option>
-            {% endfor %}
-          </select>
-          {% else %}
-          <!-- Cashier sees themselves only, dropdown disabled -->
-          <select name="cashier" class="form-select form-select-dark h-100" disabled>
-            <option value="{{ request.user.pk }}" selected>{{ request.user.username }}</option>
-          </select>
-          <!-- Hidden input to still submit the value -->
-          <input type="hidden" name="cashier" value="{{ request.user.pk }}">
-          {% endif %}
-        </div>
-        <div class="filter-item">
-          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Starting Cash</label>
-          <div class="input-group">
-            <span class="input-group-text bg-light"></span>
-            <input type="number" name="starting_cash" class="form-control"
-                   value="{{ starting_cash }}" step="0.01" min="0">
-          </div>
-        </div>
-        <div class="filter-item">
-          <label class="form-label fw-semibold text-secondary small text-uppercase d-block mb-2">Less Collection</label>
-          <div class="input-group">
-            <span class="input-group-text bg-light"></span>
-            <input type="number" name="less_collection" class="form-control"
-                   value="{{ less_collection }}" step="0.01" min="0">
-          </div>
-        </div>
-        <div class="filter-item filter-actions">
-          <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary flex-fill">
-              <i class="bi bi-calculator me-1"></i> Calculate
-            </button>
-            <button type="button" onclick="printShiftReport()" class="btn btn-dark flex-fill">
-              <i class="bi bi-printer me-1"></i> Print Report
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div><br>
-
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <!-- METRICS GRID - CSS GRID (avoids Bootstrap row/col conflicts)     -->
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div class="metrics-grid mb-4">
-
-    <!-- Starting Cash -->
-    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
-      <div class="metric-icon">
-        <i class="bi bi-wallet2"></i>
-      </div>
-      <div class="metric-label">Starting Cash</div>
-      <div class="metric-value">₱{{ starting_cash|floatformat:2 }}</div>
-    </div>
-
-    <!-- Total Sales -->
-    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
-      <div class="metric-icon">
-        <i class="bi bi-graph-up-arrow"></i>
-      </div>
-      <div class="metric-label">Total Sales</div>
-      <div class="metric-value">₱{{ total_sales|floatformat:2 }}</div>
-      <div class="metric-sub">{{ transaction_count }} txns</div>
-    </div>
-
-    <!-- Total Gross -->
-    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
-      <div class="metric-icon">
-        <i class="bi bi-cash-coin"></i>
-      </div>
-      <div class="metric-label">Gross Cash</div>
-      <div class="metric-value">₱{{ total_gross|floatformat:2 }}</div>
-      <div class="metric-sub">starting + cash sales</div>
-    </div>
-
-    <!-- Less Collection -->
-    <div class="metric-card" style="background: #1a2234; border: 1px solid rgba(255,255,255,0.07);">
-      <div class="metric-icon">
-        <i class="bi bi-arrow-down-circle"></i>
-      </div>
-      <div class="metric-label">Less Collection</div>
-      <div class="metric-value">₱{{ less_collection|floatformat:2 }}</div>
-    </div>
-
-  </div><br>
-
-  <!-- NET AMOUNT BANNER -->
-  <div class="net-banner mb-4" style="background: {% if net_amount >= starting_cash %}linear-gradient(135deg, #0ba360 0%, #3cba92 100%){% else %}linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%){% endif %};">
-    <div class="net-content">
-      <div>
-        <div class="net-label">Net Amount (Cash in Drawer)</div>
-        <div class="net-value">₱{{ net_amount|floatformat:2 }}</div>
-      </div>
-      <div class="net-badge">
-        {% if net_amount > starting_cash %}↑ Surplus{% elif net_amount == starting_cash %}→ Break-even{% else %}↓ Shortage{% endif %}
-      </div>
-    </div>
-  </div><br>
-
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <!-- DETAILS GRID - CSS GRID                                          -->
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div class="details-grid mb-4">
-
-    <!-- Sales Breakdown -->
-    <div class="detail-card">
-      <div class="detail-header">
-        <i class="bi bi-pie-chart text-primary"></i>
-        <h5>Sales Breakdown</h5>
-      </div>
-      <div class="detail-body">
-        <div class="detail-row plain">
-          <span class="text-secondary">Cash Sales</span>
-          <span class="fw-bold text-dark fs-5">₱{{ cash_sales|floatformat:2 }}</span>
-        </div>
-        {% for row in non_cash_breakdown %}
-        <div class="detail-row plain">
-          <span class="text-secondary">{{ row.label }}</span>
-          <span class="fw-semibold text-dark">₱{{ row.amount|floatformat:2 }}</span>
-        </div>
-        {% endfor %}
-        <div class="detail-row plain">
-          <span class="fw-bold text-dark">Net Sales</span>
-          <span class="fw-bold text-success fs-5">₱{{ total_sales|floatformat:2 }}</span>
-        </div>
-        <hr class="my-3">
-        <div class="detail-row plain">
-          <span class="text-secondary">Avg. Transaction</span>
-          <span class="fw-bold text-dark">₱{{ avg_transaction|floatformat:2 }}</span>
-        </div>
-        <div class="detail-row plain">
-          <span class="text-secondary">Transaction Count</span>
-          <span class="fw-bold text-dark">{{ transaction_count }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Drawer Reconciliation -->
-    <div class="detail-card">
-      <div class="detail-header">
-        <i class="bi bi-calculator text-info"></i>
-        <h5>Drawer Reconciliation</h5>
-      </div>
-      <div class="detail-body">
-        <div class="detail-row plain">
-          <span class="text-secondary">Starting Cash</span>
-          <span class="fw-semibold">₱{{ starting_cash|floatformat:2 }}</span>
-        </div>
-        <div class="detail-row plain">
-          <span class="text-secondary">+ Cash Sales</span>
-          <span class="fw-semibold text-success">+₱{{ cash_sales|floatformat:2 }}</span>
-        </div>
-        <div class="detail-row plain">
-          <span class="fw-bold text-primary">Gross Cash</span>
-          <span class="fw-bold text-primary fs-5">₱{{ total_gross|floatformat:2 }}</span>
-        </div>
-        <div class="detail-row plain">
-          <span class="text-secondary">− Cash Refunds{% if refund_count %} ({{ refund_count }}){% endif %}</span>
-          <span class="fw-semibold text-danger">−₱{{ cash_refunds|floatformat:2 }}</span>
-        </div>
-        <div class="detail-row plain">
-          <span class="text-secondary">− Collection / Drop</span>
-          <span class="fw-semibold text-danger">−₱{{ less_collection|floatformat:2 }}</span>
-        </div>
-        <hr class="border-2 border-success">
-        <div class="detail-row plain">
-          <span class="fw-bold text-dark">Expected in Drawer</span>
-          <span class="fw-bold text-success fs-4">₱{{ net_amount|floatformat:2 }}</span>
-        </div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Transactions Table
-  <div class="card border-0 shadow-sm no-print" style="border-radius: 14px;">
-    <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-4 px-4">
-      <h5 class="fw-bold text-dark mb-0">
-        <i class="bi bi-receipt text-warning me-2"></i>Transactions — {{ date_label }}
-      </h5>
-      <span class="badge bg-success rounded-pill px-3 py-2">{{ transaction_count }} sales</span>
-    </div>
-    <div class="card-body p-0">
-      <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
-          <thead class="bg-light">
-            <tr>
-              <th class="ps-4 py-3 text-secondary small fw-semibold">#</th>
-              <th class="py-3 text-secondary small fw-semibold">Time</th>
-              <th class="py-3 text-secondary small fw-semibold">Customer</th>
-              <th class="py-3 text-secondary small fw-semibold">Cashier</th>
-              <th class="py-3 text-secondary small fw-semibold text-end">Items</th>
-              <th class="pe-4 py-3 text-secondary small fw-semibold text-end">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for sale in sales %}
-            <tr>
-              <td class="ps-4 py-3">
-                <span class="badge bg-light text-dark border">#{{ sale.pk }}</span>
-              </td>
-              <td class="py-3 text-secondary">{{ sale.created_at|time:"H:i" }}</td>
-              <td class="py-3 fw-medium">{{ sale.customer|default:"Walk-in" }}</td>
-              <td class="py-3">
-                <span class="d-flex align-items-center gap-2">
-                  <div class="rounded-circle bg-primary bg-opacity-10 text-primary d-flex align-items-center justify-content-center" style="width: 28px; height: 28px; font-size: 11px; font-weight: bold;">
-                    {{ sale.cashier.username|first|upper }}
-                  </div>
-                  {{ sale.cashier }}
-                </span>
-              </td>
-              <td class="py-3 text-end">
-                <span class="badge bg-secondary bg-opacity-10 text-secondary">{{ sale.items.count }}</span>
-              </td>
-              <td class="pe-4 py-3 text-end fw-bold">₱{{ sale.total|floatformat:2 }}</td>
-            </tr>
-            {% empty %}
-            <tr>
-              <td colspan="6" class="text-center py-5 text-muted">
-                <i class="bi bi-inbox fs-1 d-block mb-2 opacity-25"></i>
-                No completed sales on {{ date_label }}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-          <tfoot class="bg-light">
-            <tr>
-              <td colspan="5" class="ps-4 py-3 text-end fw-bold text-dark">Total Sales</td>
-              <td class="pe-4 py-3 text-end fw-bold text-success fs-5">₱{{ total_sales|floatformat:2 }}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-  </div>-->
-
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <!-- POS PRINT VIEW                                                  -->
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div class="pos-print-view" style="display:none;">
-    <div class="pos-receipt">
-
-      <div class="pos-header">
-        <h2>SHIFT REPORT</h2>
-        <p>{{ date_label }}</p>
-        <p>{% if selected_cashier %}Cashier: {{ selected_cashier }}{% else %}All Cashiers{% endif %}</p>
-        <p>Generated: {% now "H:i" %}</p>
-        <div class="pos-divider">═══════════════════════</div>
-      </div>
-
-      <div class="pos-section">
-        <div class="pos-line">
-          <span>Starting Cash</span>
-          <span>₱{{ starting_cash|floatformat:2 }}</span>
-        </div>
-        <div class="pos-line">
-          <span>+ Cash Sales</span>
-          <span>₱{{ cash_sales|floatformat:2 }}</span>
-        </div>
-        <div class="pos-line pos-bold">
-          <span>= Gross Cash</span>
-          <span>₱{{ total_gross|floatformat:2 }}</span>
-        </div>
-        <div class="pos-line pos-deduction">
-          <span>− Cash Refunds</span>
-          <span>₱{{ cash_refunds|floatformat:2 }}</span>
-        </div>
-        <div class="pos-line pos-deduction">
-          <span>− Less Collection</span>
-          <span>₱{{ less_collection|floatformat:2 }}</span>
-        </div>
-        <div class="pos-divider">───────────────────────</div>
-        <div class="pos-line pos-total">
-          <span>NET AMOUNT</span>
-          <span>₱{{ net_amount|floatformat:2 }}</span>
-        </div>
-      </div>
-
-      <div class="pos-divider">═══════════════════════</div>
-      <div class="pos-section">
-        <p class="pos-center pos-bold">SALES BREAKDOWN</p>
-        <div class="pos-line">
-          <span>Transactions</span>
-          <span>{{ transaction_count }}</span>
-        </div>
-        <div class="pos-line">
-          <span>Avg. Transaction</span>
-          <span>₱{{ avg_transaction|floatformat:2 }}</span>
-        </div>
-        <div class="pos-line">
-          <span>Cash Sales</span>
-          <span>₱{{ cash_sales|floatformat:2 }}</span>
-        </div>
-        {% for row in non_cash_breakdown %}
-        <div class="pos-line">
-          <span>{{ row.label }}</span>
-          <span>₱{{ row.amount|floatformat:2 }}</span>
-        </div>
-        {% endfor %}
-        <div class="pos-line pos-bold">
-          <span>Total Sales</span>
-          <span>₱{{ total_sales|floatformat:2 }}</span>
-        </div>
-      </div>
-
-      <div class="pos-divider">═══════════════════════</div>
-      <div class="pos-footer">
-        <p>*** END OF REPORT ***</p>
-        <p>Thank you!</p>
-      </div>
-
+<!-- ── Toolbar: day, cashier, drawer amounts ── -->
+<form method="get" class="cc-toolbar" aria-label="Shift to close">
+  <div class="cc-field">
+    <span class="cc-label">Day</span>
+    <div class="cc-step">
+      <a href="?{{ prev_day_query }}" class="cc-arrow" aria-label="Previous day" title="Previous day"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
+      <label class="sr-only" for="cc-day">Day</label>
+      <input type="date" id="cc-day" name="day" class="form-control fig" value="{{ selected_date }}">
+      {% if is_today %}<span class="cc-arrow is-off" aria-hidden="true"><i class="bi bi-chevron-right"></i></span>
+      {% else %}<a href="?{{ next_day_query }}" class="cc-arrow" aria-label="Next day" title="Next day"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>{% endif %}
     </div>
   </div>
+  <label class="cc-field">
+    <span class="cc-label">Cashier</span>
+    {% if is_admin %}
+    <select name="cashier" class="form-control">
+      <option value="">All cashiers</option>
+      {% for c in cashiers %}
+      <option value="{{ c.pk }}" {% if selected_cashier == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.username }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <select class="form-control" disabled><option selected>{{ request.user.username }}</option></select>
+    <input type="hidden" name="cashier" value="{{ request.user.pk }}">
+    {% endif %}
+  </label>
+  <label class="cc-field">
+    <span class="cc-label">Starting cash</span>
+    <span class="cc-money"><span aria-hidden="true">₱</span><input type="number" name="starting_cash" class="form-control fig" value="{{ starting_cash|floatformat:2 }}" step="0.01" min="0" inputmode="decimal"></span>
+  </label>
+  <label class="cc-field">
+    <span class="cc-label">Collection / drop</span>
+    <span class="cc-money"><span aria-hidden="true">₱</span><input type="number" name="less_collection" class="form-control fig" value="{{ less_collection|floatformat:2 }}" step="0.01" min="0" inputmode="decimal"></span>
+  </label>
+  <button type="submit" class="btn btn-primary btn-sm cc-go">Calculate</button>
+</form>
 
+<div class="cc-grid">
+  <!-- ── Drawer ── -->
+  <section class="card cc-drawer" aria-labelledby="drawer-h">
+    <div class="cc-head">
+      <h2 id="drawer-h">Drawer</h2>
+      <span class="cc-hint">{{ date_label }} · {% if cashier_name %}{{ cashier_name }}{% else %}all cashiers{% endif %}</span>
+    </div>
+    <div class="cc-slip">
+      <div class="cc-line"><span>Starting cash</span><span class="fig">₱{{ starting_cash|floatformat:"2g" }}</span></div>
+      <div class="cc-line is-in"><span>Cash sales</span><span class="fig">+ ₱{{ cash_sales|floatformat:"2g" }}</span></div>
+      <div class="cc-line is-out"><span>Cash refunds{% if refund_count %} <span class="cc-muted fig">({{ refund_count }})</span>{% endif %}</span><span class="fig">− ₱{{ cash_refunds|floatformat:"2g" }}</span></div>
+      <div class="cc-line is-out"><span>Collection / drop</span><span class="fig">− ₱{{ less_collection|floatformat:"2g" }}</span></div>
+    </div>
+    <div class="cc-expected">
+      <span>Expected in drawer</span>
+      <span class="fig" id="cc-expected" data-value="{{ net_amount|stringformat:'.2f' }}">₱{{ net_amount|floatformat:"2g" }}</span>
+    </div>
+
+    <div class="cc-count">
+      <label for="cc-counted" class="cc-label">Cash counted</label>
+      <div class="cc-count-row">
+        <span class="cc-money is-big"><span aria-hidden="true">₱</span><input type="number" id="cc-counted" class="form-control fig" placeholder="0.00" step="0.01" min="0" inputmode="decimal" oninput="updateVariance()"></span>
+        <div class="cc-variance" id="cc-variance" role="status" aria-live="polite">
+          <span class="cc-var-label" id="cc-var-label">Count the drawer</span>
+          <span class="cc-var-val fig" id="cc-var-val">—</span>
+        </div>
+      </div>
+    </div>
+    <p class="cc-note">Only cash is in the drawer. GCash, Maya, card and bank payments are not part of this figure.</p>
+  </section>
+
+  <!-- ── Sales summary ── -->
+  <div class="cc-side">
+    <div class="cc-kpis">
+      <div class="cc-kpi is-lead"><span class="cc-k">Total sales</span><span class="cc-v fig">₱{{ total_sales|floatformat:"2g" }}</span></div>
+      <div class="cc-kpi"><span class="cc-k">Transactions</span><span class="cc-v fig">{{ transaction_count }}</span></div>
+      <div class="cc-kpi"><span class="cc-k">Average sale</span><span class="cc-v fig">₱{{ avg_transaction|floatformat:"2g" }}</span></div>
+      <div class="cc-kpi"><span class="cc-k">Refunds given</span><span class="cc-v fig{% if refund_count %} is-neg{% endif %}">{% if total_refunds %}− {% endif %}₱{{ total_refunds|floatformat:"2g" }}</span></div>
+    </div>
+
+    <section class="card cc-card" aria-labelledby="methods-h">
+      <div class="cc-head">
+        <h2 id="methods-h">By payment method</h2>
+        <span class="cc-hint">Sales rung up on this day</span>
+      </div>
+      {% if method_rows %}
+      <ul class="cc-list">
+        {% for m in method_rows %}
+        <li>
+          <span class="cc-li-row">
+            <span class="cc-li-name">{{ m.label }}{% if m.is_cash %} <span class="cc-tag">Drawer</span>{% endif %} <span class="cc-muted fig">· {{ m.count }} sale{{ m.count|pluralize }}</span></span>
+            <span class="cc-li-val fig">₱{{ m.amount|floatformat:"2g" }}</span>
+          </span>
+          <span class="cc-bar{% if m.is_cash %} is-cash{% endif %}"><span style="width: {{ m.pct }}%"></span></span>
+          <span class="cc-muted fig cc-pct">{{ m.pct }}%</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="cc-empty"><i class="bi bi-receipt" aria-hidden="true"></i>No sales on {{ date_label }}. Pick another day or cashier.</p>
+      {% endif %}
+      <p class="cc-foot">Sales refunded later still count on the day they were made. Refunds count on the day the money went back.</p>
+    </section>
+  </div>
 </div>
 
 <style>
-/* ═══════════════════════════════════════════════════════════════ */
-/* CSS GRID LAYOUT (avoids Bootstrap row/col conflicts)             */
-/* ═══════════════════════════════════════════════════════════════ */
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
 
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+/* ── Toolbar ── */
+.cc-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 12px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--rule); }
+.cc-field { display: flex; flex-direction: column; gap: 4px; }
+.cc-label { font-size: 11.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
+.cc-toolbar .form-control { min-height: 36px; height: 36px; padding: 0 10px; font-size: 14px; width: 150px; }
+.cc-toolbar select.form-control { width: 170px; }
+.cc-step { display: inline-flex; gap: 4px; }
+.cc-arrow { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--rule-strong); background: var(--panel); color: var(--ink); text-decoration: none; }
+.cc-arrow:hover { background: var(--paper-2); }
+.cc-arrow.is-off { color: var(--rule-strong); background: transparent; }
+.cc-money { position: relative; display: inline-flex; align-items: center; }
+.cc-money > span { position: absolute; left: 10px; color: var(--ink-3); font-family: var(--font-fig); font-size: 13px; pointer-events: none; }
+.cc-money .form-control { padding-left: 24px !important; }
+.cc-go { min-height: 36px; padding: 0 18px; }
+
+/* ── Layout ── */
+.cc-grid { display: grid; grid-template-columns: minmax(340px, 5fr) minmax(0, 7fr); gap: 12px; align-items: start; }
+.cc-side { display: flex; flex-direction: column; gap: 12px; }
+.cc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.cc-head h2 { font-size: 14px; font-weight: 700; color: var(--ink); }
+.cc-hint { font-size: 12px; color: var(--ink-3); text-align: right; }
+.cc-muted { color: var(--ink-3); font-weight: 400; font-size: 12px; }
+
+/* ── Drawer slip ── */
+.cc-drawer { padding: 14px 16px; background: var(--carbon); border-color: var(--carbon-rule); }
+.cc-slip { background: var(--panel); border: 1px solid var(--carbon-rule); padding: 0 14px; }
+.cc-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--rule-strong); font-size: 14px; color: var(--ink-2); }
+.cc-line:last-child { border-bottom: 0; }
+.cc-line .fig { font-weight: 700; color: var(--ink); white-space: nowrap; }
+.cc-line.is-in .fig { color: var(--green); }
+.cc-line.is-out .fig { color: var(--red-ink); }
+.cc-expected { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding-top: 8px; border-top: 2px solid var(--ink); font-size: 15px; font-weight: 700; }
+.cc-expected .fig { font-size: 38px; line-height: 1; letter-spacing: -1.4px; }
+.cc-count { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--carbon-rule); }
+.cc-count .cc-label { display: block; margin-bottom: 6px; color: var(--carbon-ink); }
+.cc-count-row { display: flex; gap: 10px; align-items: stretch; }
+.cc-money.is-big { flex: 1; }
+.cc-money.is-big .form-control { width: 100%; height: 48px; font-size: 20px; font-weight: 700; }
+.cc-money.is-big > span { font-size: 16px; }
+.cc-variance { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 4px 12px; background: var(--panel); border: 1px solid var(--carbon-rule); }
+.cc-var-label { font-size: 11.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
+.cc-var-val { font-size: 20px; font-weight: 700; color: var(--ink-3); line-height: 1.2; }
+.cc-variance.is-ok { background: var(--green-tint); border-color: #BFDCC9; }
+.cc-variance.is-ok .cc-var-val, .cc-variance.is-ok .cc-var-label { color: #1F6B3D; }
+.cc-variance.is-over { background: var(--amber-tint); border-color: var(--amber-rule); }
+.cc-variance.is-over .cc-var-val, .cc-variance.is-over .cc-var-label { color: var(--amber-ink); }
+.cc-variance.is-short { background: var(--red-tint); border-color: var(--red-rule); }
+.cc-variance.is-short .cc-var-val, .cc-variance.is-short .cc-var-label { color: var(--red-ink); }
+.cc-note { margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
+
+/* ── Figures ── */
+.cc-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--panel); border: 1px solid var(--rule); }
+.cc-kpi { padding: 12px 16px; border-right: 1px solid var(--rule); min-width: 0; }
+.cc-kpi:last-child { border-right: 0; }
+.cc-kpi.is-lead { background: var(--paper-2); }
+.cc-k { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
+.cc-v { display: block; font-size: 21px; font-weight: 700; letter-spacing: -.5px; line-height: 1.25; margin-top: 2px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-v.is-neg { color: var(--red-ink); }
+
+/* ── Payment methods ── */
+.cc-card { padding: 14px 16px; }
+.cc-list { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.cc-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+.cc-li-row { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.cc-li-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.cc-li-val { font-size: 14px; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.cc-tag { display: inline-block; margin-left: 4px; padding: 0 6px; background: var(--carbon); color: var(--carbon-ink); font-size: 11.5px; font-weight: 700; line-height: 1.6; vertical-align: 1px; }
+.cc-bar { display: block; height: 6px; background: var(--paper-2); }
+.cc-bar > span { display: block; height: 100%; min-width: 2px; background: var(--ink-2); }
+.cc-bar.is-cash > span { background: var(--carbon-ink); }
+.cc-pct { text-align: right; min-width: 44px; }
+.cc-empty { padding: 24px 0; text-align: center; font-size: 13.5px; color: var(--ink-3); }
+.cc-empty .bi { display: block; font-size: 22px; color: var(--rule-strong); margin-bottom: 6px; }
+.cc-foot { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--ink-3); }
+
+@media (max-width: 1199px) {
+  .cc-grid { grid-template-columns: 1fr; }
 }
-
-.metric-card {
-  border-radius: 14px;
-  padding: 20px;
-  color: white;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-}
-
-.metric-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.25);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-  font-size: 20px;
-}
-
-.metric-label {
-  font-size: 12px;
-  opacity: 0.75;
-  margin-bottom: 4px;
-}
-
-.metric-value {
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.metric-sub {
-  font-size: 12px;
-  opacity: 0.75;
-  margin-top: 4px;
-}
-
-/* Net Amount Banner */
-.net-banner {
-  border-radius: 14px;
-  padding: 24px;
-  color: white;
-}
-
-.net-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.net-label {
-  font-size: 12px;
-  opacity: 0.75;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
-}
-
-.net-value {
-  font-size: 36px;
-  font-weight: 700;
-}
-
-.net-badge {
-  background: rgba(255,255,255,0.25);
-  color: white;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-/* Details Grid */
-.details-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-}
-
-.detail-card {
-  background: var(--card, #1a2234);
-  border: 1px solid var(--border, rgba(255,255,255,0.07));
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-.detail-header {
-  padding: 20px 24px 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.detail-header i {
-  font-size: 18px;
-}
-
-.detail-header h5 {
-  margin: 0;
-  font-weight: 700;
-  color: var(--text, #f1f5f9);
-}
-
-.detail-body {
-  padding: 0 24px 20px;
-}
-
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  border-radius: 10px;
-  margin-bottom: 8px;
-}
-
-.detail-row.bg-light {
-  background: rgba(255,255,255,0.05);
-}
-
-.detail-row.highlight {
-  background: #e6fffa;
-  color: #0f766e;
-}
-
-.detail-row.bg-blue {
-  background: #e3f2fd;
-  color: #1565c0;
-}
-
-.detail-row.plain {
-  padding: 8px 16px;
-}
-
-/* Responsive */
-@media (max-width: 1200px) {
-  .metrics-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 768px) {
-  .metrics-grid {
-    grid-template-columns: 1fr;
-  }
-  .details-grid {
-    grid-template-columns: 1fr;
-  }
-  .net-content {
-    flex-direction: column;
-    text-align: center;
-    gap: 12px;
-  }
-  .net-value {
-    font-size: 28px;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════ */
-/* POS THERMAL PRINTER STYLES                                       */
-/* ═══════════════════════════════════════════════════════════════ */
-@media print {
-  @page { margin: 10mm; }
-
-  * { box-sizing: border-box; }
-
-  html, body {
-    margin: 0 !important; padding: 0 !important;
-    width: 100% !important;
-    background: white !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  .no-print, .sidebar, .navbar, header, footer,
-  .container-fluid > *:not(.pos-print-view) {
-    display: none !important; visibility: hidden !important;
-  }
-
-  .pos-print-view {
-    display: block !important; visibility: visible !important;
-    width: 100% !important; margin: 0 !important; padding: 0 !important;
-    background: white !important;
-    text-align: center !important;
-  }
-
-  .pos-receipt {
-    width: 76mm !important; margin: 0 auto !important; padding: 3mm 2mm !important;
-    font-family: 'Courier New', 'Consolas', monospace; font-size: 11px;
-    line-height: 1.35; color: #000; text-align: center;
-    display: inline-block !important;
-  }
-
-  .pos-header { margin-bottom: 5px; }
-  .pos-header h2 { font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
-  .pos-header p { margin: 1px 0; font-size: 10px; text-align: center; }
-  .pos-divider { font-size: 10px; margin: 4px 0; color: #333; text-align: center; letter-spacing: -1px; }
-  .pos-section { margin-bottom: 5px; text-align: left; }
-  .pos-line { display: flex; justify-content: space-between; align-items: baseline; margin: 2px 0; width: 100%; }
-  .pos-line span:first-child { flex: 1 1 auto; text-align: left; padding-right: 4px; }
-  .pos-line span:last-child { flex: 0 0 auto; text-align: right; white-space: nowrap; }
-  .pos-bold { font-weight: bold; }
-  .pos-deduction { color: #c00; }
-  .pos-total { font-size: 12px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 4px 0; display: flex; justify-content: space-between; }
-  .pos-center { text-align: center !important; display: block; width: 100%; }
-  .pos-footer { margin-top: 8px; font-size: 10px; }
-  .pos-footer p { margin: 1px 0; text-align: center; }
-}
-
-.pos-print-view { display: none; }
-
-
-/* Filter Grid Layout */
-.filter-grid {
-  display: grid;
-  grid-template-columns: 3fr 3fr 2fr 2fr 2fr;
-  gap: 16px;
-  align-items: end;
-}
-
-.filter-item {
-  display: flex;
-  flex-direction: column;
-}
-
-.filter-item label {
-  margin-bottom: 8px;
-}
-
-.filter-button {
-  padding-bottom: 0;
-}
-
-.filter-button button {
-  height: 38px; /* Match Bootstrap input height */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Responsive */
-@media (max-width: 1200px) {
-  .filter-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-  .filter-button {
-    grid-column: span 3;
-  }
-}
-
-@media (max-width: 768px) {
-  .filter-grid {
-    grid-template-columns: 1fr;
-  }
-  .filter-button {
-    grid-column: span 1;
-  }
-}
-
-/* Dark-themed form controls for dropdowns */
-.form-control-dark,
-.form-select-dark {
-  background-color: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-  appearance: none;
-}
-
-.form-control-dark:focus,
-.form-select-dark:focus {
-  background-color: #1e293b;
-  border-color: #3b82f6;
-  color: #e2e8f0;
-  box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.25);
-}
-
-/* Fix date input calendar icon color */
-.form-control-dark[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  opacity: 0.6;
-  cursor: pointer;
-}
-
-/* Fix select dropdown arrow */
-.form-select-dark {
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23e2e8f0' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  background-size: 16px 12px;
-}
-
-/* Ensure options are readable */
-.form-select-dark option {
-  background-color: #1e293b;
-  color: #e2e8f0;
-}
-
-/* Hover states */
-.form-control-dark:hover,
-.form-select-dark:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-/* Match select height to inputs */
-.form-select-dark {
-  height: 38px;           /* Same as Bootstrap default input height */
-  min-height: 38px;
-  padding-top: 0.375rem;
-  padding-bottom: 0.375rem;
-  padding-left: 0.75rem;
-  font-size: 1rem;
-  line-height: 1.5;
-}
-
-/* Or use this if you want it to stretch with flex */
-.filter-item .form-select {
-  height: auto;
-  min-height: 38px;
-  flex: 1;
-}
-
-/* Ensure all filter inputs same height */
-.filter-item .form-control,
-.filter-item .form-select,
-.filter-item .input-group {
-  height: 38px;
-  min-height: 38px;
-}
-
-.filter-item .input-group .form-control {
-  height: 100%;
-}
-
-/* Dark-themed form controls */
-.form-control-dark,
-.form-select-dark {
-  background-color: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
-}
-
-.form-control-dark:focus,
-.form-select-dark:focus {
-  background-color: #1e293b;
-  border-color: #3b82f6;
-  color: #e2e8f0;
-  box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.25);
-}
-
-/* Fix date input calendar icon */
-.form-control-dark[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  opacity: 0.6;
-  cursor: pointer;
-}
-
-/* Fix select dropdown arrow */
-.form-select-dark {
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23e2e8f0' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  background-size: 16px 12px;
-}
-
-.form-select-dark option {
-  background-color: #1e293b;
-  color: #e2e8f0;
-}
-
-/* Button match */
-.filter-button button {
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+@media (max-width: 760px) {
+  .cc-toolbar { padding: 10px; }
+  .cc-field { flex: 1 1 140px; }
+  .cc-toolbar .form-control, .cc-toolbar select.form-control { width: 100%; }
+  .cc-step { width: 100%; }
+  .cc-step .form-control { flex: 1; min-width: 0; }
+  .cc-money { width: 100%; }
+  .cc-go { flex: 1 1 100%; min-height: 44px; }
+  .cc-kpis { grid-template-columns: 1fr 1fr; }
+  .cc-kpi:nth-child(2) { border-right: 0; }
+  .cc-kpi:nth-child(-n+2) { border-bottom: 1px solid var(--rule); }
+  .cc-expected .fig { font-size: 32px; }
+  .cc-count-row { flex-direction: column; }
 }
 </style>
 
-<script>
-function printShiftReport() {
-  const receipt = document.querySelector('.pos-receipt');
-  if (!receipt) return;
+<!-- ── Printed slip (80mm) ── -->
+<div class="pos-print-view" style="display:none;">
+  <div class="pos-receipt">
+    <div class="pos-header">
+      <h2>CASH CLOSING</h2>
+      <p>{{ date_label }}</p>
+      <p>{% if cashier_name %}Cashier: {{ cashier_name }}{% else %}All cashiers{% endif %}</p>
+      <p>Printed: {% now "M d, Y H:i" %}</p>
+      <div class="pos-divider">═══════════════════════</div>
+    </div>
+    <div class="pos-section">
+      <div class="pos-line"><span>Starting cash</span><span>₱{{ starting_cash|floatformat:2 }}</span></div>
+      <div class="pos-line"><span>+ Cash sales</span><span>₱{{ cash_sales|floatformat:2 }}</span></div>
+      <div class="pos-line pos-bold"><span>= Gross cash</span><span>₱{{ total_gross|floatformat:2 }}</span></div>
+      <div class="pos-line"><span>− Cash refunds</span><span>₱{{ cash_refunds|floatformat:2 }}</span></div>
+      <div class="pos-line"><span>− Collection / drop</span><span>₱{{ less_collection|floatformat:2 }}</span></div>
+      <div class="pos-divider">───────────────────────</div>
+      <div class="pos-line pos-total"><span>EXPECTED</span><span>₱{{ net_amount|floatformat:2 }}</span></div>
+      <div class="pos-line pos-count" hidden><span>Counted</span><span class="pos-counted"></span></div>
+      <div class="pos-line pos-bold pos-count" hidden><span class="pos-var-label">Variance</span><span class="pos-var"></span></div>
+    </div>
+    <div class="pos-divider">═══════════════════════</div>
+    <div class="pos-section">
+      <p class="pos-center pos-bold">SALES</p>
+      <div class="pos-line"><span>Transactions</span><span>{{ transaction_count }}</span></div>
+      <div class="pos-line"><span>Average sale</span><span>₱{{ avg_transaction|floatformat:2 }}</span></div>
+      <div class="pos-line"><span>Cash</span><span>₱{{ cash_sales|floatformat:2 }}</span></div>
+      {% for row in non_cash_breakdown %}
+      <div class="pos-line"><span>{{ row.label }}</span><span>₱{{ row.amount|floatformat:2 }}</span></div>
+      {% endfor %}
+      <div class="pos-line pos-bold"><span>Total sales</span><span>₱{{ total_sales|floatformat:2 }}</span></div>
+      {% if refund_count %}<div class="pos-line"><span>Refunds given ({{ refund_count }})</span><span>−₱{{ total_refunds|floatformat:2 }}</span></div>{% endif %}
+    </div>
+    <div class="pos-divider">═══════════════════════</div>
+    <div class="pos-footer">
+      <p>Counted by: ____________________</p>
+      <p>Checked by: ____________________</p>
+      <p>*** END OF REPORT ***</p>
+    </div>
+  </div>
+</div>
 
-  const printWindow = window.open('', '_blank', `width=${screen.availWidth},height=${screen.availHeight},left=0,top=0`);
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Shift Report</title>
-      <style>
-        @page { margin: 5mm; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body {
-          width: 100%;
-          background: white;
-          display: flex;
-          justify-content: center;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-        .pos-receipt {
-          width: 76mm;
-          padding: 3mm 2mm;
-          font-family: 'Courier New', 'Consolas', monospace;
-          font-size: 11px;
-          line-height: 1.35;
-          color: #000;
-          text-align: center;
-        }
-        .pos-header { margin-bottom: 5px; }
-        .pos-header h2 { font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; text-align: center; }
-        .pos-header p { margin: 1px 0; font-size: 10px; text-align: center; }
-        .pos-divider { font-size: 10px; margin: 4px 0; color: #333; text-align: center; letter-spacing: -1px; }
-        .pos-section { margin-bottom: 5px; text-align: left; }
-        .pos-line { display: flex; justify-content: space-between; align-items: baseline; margin: 2px 0; width: 100%; }
-        .pos-line span:first-child { flex: 1 1 auto; text-align: left; padding-right: 4px; }
-        .pos-line span:last-child { flex: 0 0 auto; text-align: right; white-space: nowrap; }
-        .pos-bold { font-weight: bold; }
-        .pos-deduction { color: #c00; }
-        .pos-total { font-size: 12px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 4px 0; display: flex; justify-content: space-between; }
-        .pos-center { text-align: center !important; display: block; width: 100%; }
-        .pos-footer { margin-top: 8px; font-size: 10px; }
-        .pos-footer p { margin: 1px 0; text-align: center; }
-      </style>
-    </head>
-    <body>
-      ${receipt.outerHTML}
-    </body>
-    </html>
-  `);
-  printWindow.document.close();
-  printWindow.moveTo(0, 0);
-  printWindow.resizeTo(screen.availWidth, screen.availHeight);
-  printWindow.focus();
-  setTimeout(() => {
-    printWindow.print();
-    printWindow.close();
-  }, 250);
+<script>
+const peso = n => '₱' + Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const EXPECTED = parseFloat(document.getElementById('cc-expected').dataset.value) || 0;
+
+// Over / short as the cashier types the counted amount
+function updateVariance() {
+  const raw = document.getElementById('cc-counted').value;
+  const box = document.getElementById('cc-variance');
+  const label = document.getElementById('cc-var-label');
+  const val = document.getElementById('cc-var-val');
+  box.classList.remove('is-ok', 'is-over', 'is-short');
+  if (raw === '') { label.textContent = 'Count the drawer'; val.textContent = '—'; return; }
+  const diff = Math.round((parseFloat(raw) - EXPECTED) * 100) / 100;
+  if (diff === 0) { box.classList.add('is-ok'); label.textContent = 'Balanced'; val.textContent = peso(0); }
+  else if (diff > 0) { box.classList.add('is-over'); label.textContent = 'Over'; val.textContent = '+ ' + peso(diff); }
+  else { box.classList.add('is-short'); label.textContent = 'Short'; val.textContent = '− ' + peso(-diff); }
+}
+
+function printShiftReport() {
+  const receipt = document.querySelector('.pos-receipt').cloneNode(true);
+  const raw = document.getElementById('cc-counted').value;
+  if (raw !== '') {
+    const diff = Math.round((parseFloat(raw) - EXPECTED) * 100) / 100;
+    receipt.querySelectorAll('.pos-count').forEach(el => el.hidden = false);
+    receipt.querySelector('.pos-counted').textContent = peso(raw);
+    receipt.querySelector('.pos-var-label').textContent = diff === 0 ? 'Balanced' : (diff > 0 ? 'Over' : 'Short');
+    receipt.querySelector('.pos-var').textContent = (diff > 0 ? '+' : diff < 0 ? '−' : '') + peso(Math.abs(diff));
+  }
+  const w = window.open('', '_blank', 'width=420,height=640');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cash Closing</title><style>
+    @page { size: 80mm auto; margin: 4mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #fff; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pos-receipt { width: 72mm; margin: 0 auto; font-family: 'Courier New', Consolas, monospace; font-size: 11px; line-height: 1.4; }
+    .pos-header { text-align: center; margin-bottom: 4px; }
+    .pos-header h2 { font-size: 13px; letter-spacing: .5px; }
+    .pos-header p { font-size: 10px; }
+    .pos-divider { text-align: center; font-size: 10px; margin: 4px 0; letter-spacing: -1px; }
+    .pos-line { display: flex; justify-content: space-between; gap: 6px; margin: 2px 0; }
+    .pos-line[hidden] { display: none; }
+    .pos-line span:last-child { white-space: nowrap; }
+    .pos-bold { font-weight: bold; }
+    .pos-total { font-size: 12px; font-weight: bold; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 3px 0; margin: 4px 0; }
+    .pos-center { text-align: center; }
+    .pos-footer { margin-top: 8px; font-size: 10px; text-align: center; }
+    .pos-footer p { margin: 6px 0; }
+  </style></head><body>${receipt.outerHTML}</body></html>`);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); w.close(); }, 250);
 }
 </script>
 

@@ -1,0 +1,5 @@
+{# Change against the previous period. Up is green; down is ink (red is never "down"). #}
+{% if delta is None %}<span class="was">No earlier period to compare</span>
+{% elif delta > 0 %}<span class="up"><i class="bi bi-arrow-up-right" aria-hidden="true"></i> <span class="fig">{{ delta }}%</span></span>
+{% elif delta < 0 %}<span class="down"><i class="bi bi-arrow-down-right" aria-hidden="true"></i> <span class="fig">{{ delta|stringformat:"s"|cut:"-" }}%</span></span>
+{% else %}<span class="flat"><span class="fig">0%</span> change</span>{% endif %}

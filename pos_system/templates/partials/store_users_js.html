@@ -1,0 +1,328 @@
+{% comment %} Script for the users table and its pop-ups. Needs: csrf_token, add_user_url. {% endcomment %}
+<script>
+const CSRF           = '{{ csrf_token }}';
+const ADD_URL        = '{{ add_user_url|escapejs }}';
+
+/* ── Escaping for rows built here (names and emails are free text) ── */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const arg = v => esc(JSON.stringify(String(v ?? '')));   // a JS string literal, safe inside an HTML attribute
+
+/* ── Modal helpers ─────────────────────────────── */
+let lastFocus = null;
+function openModal(id) {
+  lastFocus = document.activeElement;
+  const dlg = document.getElementById(id);
+  dlg.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  const target = dlg.querySelector('input:not([type=hidden]):not([type=checkbox]), select') || dlg.querySelector('.btn-ghost');
+  if (target) setTimeout(() => target.focus(), 0);
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  document.body.style.overflow = '';
+  if (lastFocus) lastFocus.focus();
+}
+document.querySelectorAll('.modal-backdrop').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop.open').forEach(el => closeModal(el.id));
+});
+
+/* ── Toast ─────────────────────────────────────── */
+let toastTimer;
+function showToast(msg, type = 'success') {
+  const toast = document.getElementById('toast');
+  const tone = { success: 'ok', warning: 'warn', error: 'err' }[type] || 'ok';
+  const icon = { ok: 'bi bi-check-circle-fill', warn: 'bi bi-exclamation-triangle-fill', err: 'bi bi-x-circle-fill' }[tone];
+  toast.className = 'app-toast ' + tone;
+  document.getElementById('toast-icon').className = icon;
+  document.getElementById('toast-msg').textContent = msg;
+  requestAnimationFrame(() => toast.classList.add('show'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 4000);
+}
+
+/* ── Inline modal alert ────────────────────────── */
+function showModalAlert(prefix, msg) {
+  const al = document.getElementById(prefix + '-alert');
+  const ms = document.getElementById(prefix + '-alert-msg');
+  if (!al || !ms) return;
+  ms.textContent = msg;
+  al.style.display = 'flex';
+}
+function clearModalAlert(prefix) {
+  const al = document.getElementById(prefix + '-alert');
+  if (al) al.style.display = 'none';
+}
+
+/* ── Loading state ─────────────────────────────── */
+function setLoading(btnId, loading) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.disabled = loading;
+  if (loading) { btn._orig = btn.innerHTML; btn.textContent = 'Saving…'; }
+  else if (btn._orig) { btn.innerHTML = btn._orig; }
+}
+
+/* ── Password visibility toggle ────────────────── */
+function togglePw(id, btn) {
+  const inp = document.getElementById(id);
+  const show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  btn.innerHTML = show ? '<i class="bi bi-eye-slash"></i>' : '<i class="bi bi-eye"></i>';
+  btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+}
+
+/* ── AJAX helper ───────────────────────────────── */
+async function postAjax(url, data) {
+  const fd = new FormData();
+  Object.entries(data).forEach(([k, v]) => fd.append(k, v));
+  fd.append('csrfmiddlewaretoken', CSRF);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': CSRF },
+    body: fd
+  });
+  return res.json();
+}
+
+/* ── Format Django errors ──────────────────────── */
+function formatErrors(errors) {
+  if (typeof errors === 'string') return errors;
+  // Each field maps to a message or a list of messages (strings or {message}).
+  return Object.values(errors || {})
+    .flatMap(errs => [].concat(errs))
+    .map(e => (e && typeof e === 'object') ? e.message : e)
+    .filter(Boolean)
+    .join(' ');
+}
+
+/* ── Row parts (same markup as the server-rendered rows) ── */
+const ROLE_NAME = u => u.is_superuser ? 'Admin' : (u.is_staff ? 'Manager' : 'Cashier');
+const ACCESS = [
+  ['can_access_products', 'Products'], ['can_access_categories', 'Categories'], ['can_access_reports', 'Reports'],
+  ['can_access_user_management', 'Users'], ['can_access_pending_sales', 'Held sales'], ['can_access_shift_report', 'Cash closing'],
+];
+function editCall(u) {
+  const role = u.is_superuser ? 'admin' : (u.is_staff ? 'manager' : 'cashier');
+  return `openEditModal(${Number(u.pk)},${arg(u.username)},${arg(u.first_name)},${arg(u.last_name)},${arg(u.email === '—' ? '' : u.email)},${arg(role)},${!!u.can_access_products},${!!u.can_access_categories},${!!u.can_access_reports},${!!u.can_access_user_management},${!!u.can_access_pending_sales},${!!u.can_access_shift_report},${!!u.is_active})`;
+}
+function userCells(u) {
+  const name = u.full_name && u.full_name !== '—' ? u.full_name : u.username;
+  const access = ACCESS.filter(([k]) => u[k]).map(([, label]) => `<span>${label}</span>`).join('') || '<em>Register only</em>';
+  return `
+    <td class="u-who"><span class="u-name">${esc(name)}</span><span class="u-handle"><span class="fig">${esc(u.username)}</span>${u.email && u.email !== '—' ? `<span class="u-mail"> · ${esc(u.email)}</span>` : ''}</span></td>
+    <td class="u-role">${ROLE_NAME(u)}</td>
+    <td class="u-access">${access}</td>
+    <td><span class="u-status${u.is_active ? '' : ' is-off'}">${u.is_active ? 'Active' : 'Inactive'}</span></td>
+    <td><div class="row-actions">
+      <button type="button" class="btn btn-ghost btn-sm js-edit" onclick="${editCall(u)}">Edit</button>
+      <button type="button" class="btn btn-ghost btn-sm icon-btn" onclick="openPwModal(${Number(u.pk)},${arg(u.username)})" aria-label="Reset password for ${esc(u.username)}" title="Reset password"><i class="bi bi-key" aria-hidden="true"></i></button>
+      <button type="button" class="btn btn-ghost btn-sm icon-btn is-danger" onclick="openDelModal(${Number(u.pk)},${arg(u.username)})" aria-label="Remove ${esc(u.username)}" title="Remove user"><i class="bi bi-trash" aria-hidden="true"></i></button>
+    </div></td>`;
+}
+
+function updateCount() {
+  const n = document.querySelectorAll('#user-tbody tr[id^="user-row-"]').length;
+  document.querySelectorAll('[data-user-count]').forEach(el => { el.textContent = n; });
+}
+
+/* ── Permissions sync from role ─────────────────── */
+function syncPermissions(prefix) {
+  const role = document.getElementById(prefix + '-role').value;
+  const fields = ['products', 'categories', 'reports', 'users', 'pending', 'shift'];
+  const matrix = {
+    admin:   [true,  true,  true,  true,  true,  true],
+    manager: [true,  true,  true,  false, true,  true],
+    cashier: [false, false, false, false, false, false],
+  };
+  const vals = matrix[role] || matrix.cashier;
+  fields.forEach((f, i) => {
+    const el = document.getElementById(prefix + '-perm-' + f);
+    if (el) el.checked = vals[i];
+  });
+}
+
+function getPermissions(prefix) {
+  const on = f => document.getElementById(prefix + '-perm-' + f).checked ? '1' : 'false';
+  return {
+    can_access_products: on('products'),
+    can_access_categories: on('categories'),
+    can_access_reports: on('reports'),
+    can_access_user_management: on('users'),
+    can_access_pending_sales: on('pending'),
+    can_access_shift_report: on('shift'),
+  };
+}
+
+/* ── Add user ──────────────────────────────────── */
+function resetAddForm() {
+  ['add-first-name', 'add-last-name', 'add-username', 'add-email', 'add-pw1', 'add-pw2'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('add-role').value = 'cashier';
+  document.getElementById('add-is-active').checked = true;
+  syncPermissions('add');
+  clearModalAlert('add');
+}
+
+async function submitAdd() {
+  clearModalAlert('add');
+  setLoading('add-btn', true);
+  try {
+    const data = await postAjax(ADD_URL, {
+      username:   document.getElementById('add-username').value,
+      first_name: document.getElementById('add-first-name').value,
+      last_name:  document.getElementById('add-last-name').value,
+      email:      document.getElementById('add-email').value,
+      role:       document.getElementById('add-role').value,
+      is_active:  document.getElementById('add-is-active').checked ? '1' : 'false',
+      password:   document.getElementById('add-pw1').value,
+      password2:  document.getElementById('add-pw2').value,
+      ...getPermissions('add'),
+    });
+    if (data.success) {
+      closeModal('modal-add');
+      appendUserRow(data.user);
+      updateCount();
+      showToast(`Added ${data.user.username}.`, 'success');
+    } else {
+      showModalAlert('add', formatErrors(data.errors));
+    }
+  } catch (e) {
+    showModalAlert('add', 'Could not reach the server. Check the connection and try again.');
+  }
+  setLoading('add-btn', false);
+}
+
+function appendUserRow(u) {
+  document.getElementById('empty-row')?.remove();
+  const tr = document.createElement('tr');
+  tr.id = `user-row-${Number(u.pk)}`;
+  tr.dataset.editUrl = u.edit_url;
+  tr.dataset.pwUrl = u.pw_url;
+  tr.dataset.removeUrl = u.remove_url;
+  tr.innerHTML = userCells(u);
+  document.getElementById('user-tbody').appendChild(tr);
+}
+
+/* ── Edit user ─────────────────────────────────── */
+function openEditModal(pk, username, firstName, lastName, email, role,
+                       permProducts, permCategories, permReports, permUsers,
+                       permPending, permShift, isActive) {
+  const row = document.getElementById(`user-row-${pk}`);
+  document.getElementById('edit-pk').value = pk;
+  document.getElementById('edit-url').value = row ? row.dataset.editUrl : '';
+  document.getElementById('edit-title').textContent = username;
+  document.getElementById('edit-username').value = username;
+  document.getElementById('edit-first-name').value = firstName;
+  document.getElementById('edit-last-name').value = lastName;
+  document.getElementById('edit-email').value = email;
+  document.getElementById('edit-role').value = role;
+  document.getElementById('edit-perm-products').checked = permProducts;
+  document.getElementById('edit-perm-categories').checked = permCategories;
+  document.getElementById('edit-perm-reports').checked = permReports;
+  document.getElementById('edit-perm-users').checked = permUsers;
+  document.getElementById('edit-perm-pending').checked = permPending;
+  document.getElementById('edit-perm-shift').checked = permShift;
+  document.getElementById('edit-is-active').checked = isActive;
+  clearModalAlert('edit');
+  openModal('modal-edit');
+}
+
+async function submitEdit() {
+  clearModalAlert('edit');
+  const url = document.getElementById('edit-url').value;
+  setLoading('edit-btn', true);
+  try {
+    const data = await postAjax(url, {
+      username:   document.getElementById('edit-username').value,
+      first_name: document.getElementById('edit-first-name').value,
+      last_name:  document.getElementById('edit-last-name').value,
+      email:      document.getElementById('edit-email').value,
+      role:       document.getElementById('edit-role').value,
+      is_active:  document.getElementById('edit-is-active').checked ? '1' : 'false',
+      ...getPermissions('edit'),
+    });
+    if (data.success) {
+      closeModal('modal-edit');
+      refreshRow(data.user);
+      showToast(`Saved ${data.user.username}.`, 'success');
+    } else {
+      showModalAlert('edit', formatErrors(data.errors));
+    }
+  } catch (e) {
+    showModalAlert('edit', 'Could not reach the server. Check the connection and try again.');
+  }
+  setLoading('edit-btn', false);
+}
+
+function refreshRow(u) {
+  const row = document.getElementById(`user-row-${u.pk}`);
+  if (row) row.innerHTML = userCells(u);
+}
+
+/* ── Reset password ────────────────────────────── */
+function openPwModal(pk, username) {
+  const row = document.getElementById(`user-row-${pk}`);
+  document.getElementById('pw-url').value = row ? row.dataset.pwUrl : '';
+  document.getElementById('pw-title').textContent = username;
+  document.getElementById('pw-new1').value = '';
+  document.getElementById('pw-new2').value = '';
+  clearModalAlert('pw');
+  openModal('modal-pw');
+}
+
+async function submitPw() {
+  clearModalAlert('pw');
+  const url = document.getElementById('pw-url').value;
+  setLoading('pw-btn', true);
+  try {
+    const data = await postAjax(url, {
+      new_password1: document.getElementById('pw-new1').value,
+      new_password2: document.getElementById('pw-new2').value,
+    });
+    if (data.success) {
+      closeModal('modal-pw');
+      showToast('Password reset. Share it with the user in person.', 'success');
+    } else {
+      showModalAlert('pw', formatErrors(data.errors));
+    }
+  } catch (e) {
+    showModalAlert('pw', 'Could not reach the server. Check the connection and try again.');
+  }
+  setLoading('pw-btn', false);
+}
+
+/* ── Remove user ───────────────────────────────── */
+function openDelModal(pk, username) {
+  const row = document.getElementById(`user-row-${pk}`);
+  document.getElementById('del-pk').value = pk;
+  document.getElementById('del-url').value = row ? row.dataset.removeUrl : '';
+  document.getElementById('del-username').textContent = username;
+  clearModalAlert('del');
+  openModal('modal-del');
+}
+
+async function submitDel() {
+  clearModalAlert('del');
+  const pk = document.getElementById('del-pk').value;
+  const url = document.getElementById('del-url').value;
+  setLoading('del-btn', true);
+  try {
+    const data = await postAjax(url, {});
+    if (data.success) {
+      closeModal('modal-del');
+      document.getElementById(`user-row-${pk}`)?.remove();
+      updateCount();
+      showToast(`Removed ${data.username}.`, 'success');
+    } else {
+      showModalAlert('del', formatErrors(data.errors));
+    }
+  } catch (e) {
+    showModalAlert('del', 'Could not reach the server. Check the connection and try again.');
+  }
+  setLoading('del-btn', false);
+}
+</script>

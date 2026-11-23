@@ -12,4 +12,5 @@ urlpatterns = [
     path('customers/', include('customers.urls')),
     path('reports/', include('reports.urls')),
     path('price-check/', include('price_checker.urls')),
+    path('archive/',        include('archive.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

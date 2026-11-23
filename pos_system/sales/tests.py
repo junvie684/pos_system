@@ -20,6 +20,62 @@ class SaleTestBase(TestCase):
         return Product.all_objects.get(pk=self.product.pk).stock
 
 
+class CashierTemplateContractTests(SaleTestBase):
+    def setUp(self):
+        super().setUp()
+        self.pending = make_sale(self.tenant, self.cashier, self.product, status='pending')
+        self.completed = make_sale(self.tenant, self.cashier, self.product)
+
+    def test_register_exposes_catalog_and_current_sale_regions(self):
+        pos_login(self.client, self.cashier)
+
+        response = self.client.get('/new/')
+
+        self.assertContains(response, 'data-cashier-workspace="register"')
+        self.assertContains(response, 'data-register-toolbar="catalog-controls"')
+        self.assertContains(response, 'data-register-region="catalog"')
+        self.assertContains(response, 'data-register-region="current-sale"')
+        self.assertContains(response, 'aria-label="Checkout workspace"')
+
+    def test_register_exposes_safe_initial_action_and_live_status_states(self):
+        pos_login(self.client, self.cashier)
+
+        response = self.client.get('/new/')
+
+        self.assertContains(response, 'id="cart-status"')
+        self.assertContains(response, 'id="clear-cart-btn"')
+        self.assertContains(response, 'id="hold-btn"')
+        self.assertContains(response, 'id="complete-btn"')
+        self.assertContains(response, 'aria-label="Sale actions"')
+        self.assertContains(response, 'aria-describedby="cart-total"')
+
+    def test_held_sale_screens_expose_cashier_flow_landmarks(self):
+        pos_login(self.client, self.cashier)
+
+        listing = self.client.get('/pending/')
+        confirmation = self.client.get(f'/pending/{self.pending.pk}/delete/')
+
+        self.assertContains(listing, 'data-cashier-screen="held-sales"')
+        self.assertContains(listing, 'id="held-sales-note"')
+        self.assertContains(listing, 'aria-hidden="true"')
+        self.assertContains(confirmation, 'data-cashier-screen="delete-held-sale"')
+        self.assertContains(confirmation, 'aria-labelledby="delete-held-title"')
+
+    def test_receipt_and_refund_expose_transaction_state_landmarks(self):
+        pos_login(self.client, self.cashier)
+        receipt = self.client.get(f'/receipt/{self.completed.pk}/')
+
+        self.client.post('/accounts/logout/')
+        pos_login(self.client, self.manager)
+        refund = self.client.get(f'/refund/{self.completed.pk}/')
+
+        self.assertContains(receipt, 'data-receipt-state="completed"')
+        self.assertContains(receipt, 'class="receipt-paper"')
+        self.assertContains(refund, 'data-cashier-screen="refund-confirmation"')
+        self.assertContains(refund, 'aria-labelledby="refund-title"')
+        self.assertContains(refund, 'aria-describedby="refund-warning"')
+
+
 # ─── C-3: server must price every line ──────────────────────────
 class ServerSidePricingTests(SaleTestBase):
     def test_create_sale_ignores_client_unit_price(self):
@@ -303,3 +359,48 @@ class RefundTests(SaleTestBase):
         self.client.post(f'/refund/{sale.pk}/')
         sale.refresh_from_db()
         self.assertEqual(sale.status, 'completed')
+
+
+class OrNumberTests(SaleTestBase):
+    databases = {'default', 'archive'}   # sales history also reads the archive database
+
+    def setUp(self):
+        super().setUp()
+        pos_login(self.client, self.cashier)
+
+    def checkout(self, status='completed'):
+        self.client.post('/new/', sale_post([(self.product, 1, '50.00')], status=status, cash_tendered='50.00'))
+        return Sale.all_objects.latest('pk')
+
+    def test_completed_sales_get_running_or_numbers(self):
+        first, second = self.checkout(), self.checkout()
+        self.assertEqual((first.or_number, second.or_number), (1, 2))
+        self.assertEqual(second.or_display, 'OR-000002')
+
+    def test_held_sale_gets_no_number_until_completed(self):
+        held = self.checkout(status='pending')
+        self.assertIsNone(held.or_number)
+        done = self.checkout()
+        self.assertEqual(done.or_number, 1)  # the held sale didn't use one up
+        self.client.post(f'/pending/{held.pk}/resume/',
+                         sale_post([(self.product, 1, '50.00')], cash_tendered='50.00'))
+        held.refresh_from_db()
+        self.assertEqual(held.or_number, 2)
+
+    def test_each_store_counts_from_one(self):
+        self.checkout()
+        other = make_tenant('store-b')
+        cashier_b = make_user(other, 'cashier-b')
+        product_b = make_product(other, price='20.00', stock=5)
+        client_b = self.client_class()
+        pos_login(client_b, cashier_b)
+        client_b.post('/new/', sale_post([(product_b, 1, '20.00')], cash_tendered='20.00'))
+        self.assertEqual(Sale.all_objects.filter(tenant_id=other.id).get().or_number, 1)
+
+    def test_receipt_and_history_show_or_number(self):
+        sale = self.checkout()
+        self.assertContains(self.client.get(f'/receipt/{sale.pk}/'), 'OR-000001')
+        self.client.post('/accounts/logout/')
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/history/', {'q': 'OR-000001'})
+        self.assertEqual([s.pk for s in resp.context['sales']], [sale.pk])

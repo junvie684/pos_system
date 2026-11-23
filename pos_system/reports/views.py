@@ -1,5 +1,5 @@
 import csv
-import json
+import logging
 import calendar
 from datetime import datetime, date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from django.contrib.auth.models import User
 from django.shortcuts import render, redirect
 from django.utils import timezone
+from django.db import DatabaseError
 from django.db.models import Sum, F
 from django.http import HttpResponse
 from django.core.paginator import Paginator
@@ -14,22 +15,49 @@ from django.core.paginator import Paginator
 from accounts.decorators import feature_required
 from sales.models import Sale, SaleItem
 
-from .ledger import refunds_given, refunds_given_by, sales_made, total_of
+from .ledger import (
+    archived_completed, archived_refunds_given, archived_sales_made, archived_total, oldest_archived_year,
+    refunds_given, refunds_given_by, sales_made, total_of,
+)
+
+logger = logging.getLogger(__name__)
 
 def _period_ledger(start, end):
-    """Sales made, refunds given and the net, for a date range (see reports/ledger.py)."""
+    """Sales made, refunds given and the net, for a date range (see reports/ledger.py).
+    Includes sales moved to the archive database; if it can't be reached the
+    ledger covers the main database only and says so."""
     made = sales_made(start, end).select_related('customer', 'cashier').order_by('created_at')
     refunds = refunds_given(start, end).select_related('customer', 'cashier', 'refunded_by').order_by('refund_time')
     gross = total_of(made)
     refunded = total_of(refunds)
+    made_count, refund_count = made.count(), refunds.count()
+    archive_unavailable = False
+
+    try:
+        arch_made = archived_sales_made(start, end)
+        arch_refunds = archived_refunds_given(start, end)
+        if arch_made.exists() or arch_refunds.exists():
+            # A sale caught mid-move can be in both databases; count it once.
+            arch_made = arch_made.exclude(pk__in=list(made.values_list('pk', flat=True)))
+            arch_refunds = arch_refunds.exclude(pk__in=list(refunds.values_list('pk', flat=True)))
+            gross += archived_total(arch_made)
+            refunded += archived_total(arch_refunds)
+            made = sorted([*made, *arch_made], key=lambda s: s.created_at)
+            refunds = sorted([*refunds, *arch_refunds], key=lambda s: s.refund_time)
+            made_count, refund_count = len(made), len(refunds)
+    except DatabaseError:
+        logger.exception('Archive database unavailable for report %s..%s', start, end)
+        archive_unavailable = True
+
     return {
         'made': made,
         'refunds': refunds,
         'gross_sales': gross,
         'refunds_total': refunded,
         'total': gross - refunded,
-        'transaction_count': made.count(),
-        'refund_count': refunds.count(),
+        'transaction_count': made_count,
+        'refund_count': refund_count,
+        'archive_unavailable': archive_unavailable,
     }
 
 
@@ -76,6 +104,7 @@ def _ledger_context(ledger, request):
         'total':             ledger['total'],
         'transaction_count': ledger['transaction_count'],
         'refund_count':      ledger['refund_count'],
+        'archive_unavailable': ledger['archive_unavailable'],
     }
 
 
@@ -204,7 +233,7 @@ def analytics(request):
         status='completed',
         created_at__date__gte=curr_start,
         created_at__date__lte=curr_end,
-    ).prefetch_related('items').order_by('-created_at')
+    ).select_related('customer', 'cashier').prefetch_related('items').order_by('-created_at')
 
     prev_qs = Sale.objects.filter(
         status='completed',
@@ -213,8 +242,20 @@ def analytics(request):
     ).prefetch_related('items')
 
     # ── Stats ─────────────────────────────────────────────────────
+    # Sales past the retention period live in the archive database; they are
+    # read separately and counted with the rest.
     curr_sales_list = list(curr_qs)
     prev_sales_list = list(prev_qs)
+    archive_unavailable = False
+    oldest_year = None
+    try:
+        curr_sales_list += archived_completed(curr_start, curr_end, curr_qs)
+        prev_sales_list += archived_completed(prev_start, prev_end, prev_qs)
+        curr_sales_list.sort(key=lambda s: s.created_at, reverse=True)
+        oldest_year = oldest_archived_year()
+    except DatabaseError:
+        logger.exception('Archive database unavailable for analytics')
+        archive_unavailable = True
 
     curr_revenue = sum(s.total for s in curr_sales_list)
     prev_revenue = sum(s.total for s in prev_sales_list)
@@ -228,86 +269,70 @@ def analytics(request):
             return None
         return round(((float(curr) - float(prev)) / float(prev)) * 100, 1)
 
+    curr_items = sum(i.quantity for s in curr_sales_list for i in s.items.all())
+    prev_items = sum(i.quantity for s in prev_sales_list for i in s.items.all())
+    items_delta = pct_delta(curr_items, prev_items)
     revenue_delta = pct_delta(curr_revenue, prev_revenue)
     count_delta = pct_delta(curr_count, prev_count)
     avg_delta = pct_delta(curr_avg, prev_avg)
 
     # ── Chart data ────────────────────────────────────────────────
-    from django.db.models.functions import TruncHour, TruncDate
-
-    def sale_items_revenue(date_gte, date_lte):
-        return (
-            SaleItem.objects
-            .filter(
-                sale__status='completed',
-                sale__created_at__date__gte=date_gte,
-                sale__created_at__date__lte=date_lte,
-            )
-        )
+    # Bucketed from the sale lists above, so archived sales are included.
+    def revenue_by(sales, key):
+        buckets = {}
+        for sale in sales:
+            k = key(timezone.localtime(sale.created_at))
+            buckets[k] = buckets.get(k, 0) + float(sale.total)
+        return buckets
 
     if mode == 'daily':
         # Hourly buckets 00:00 – 23:00
         chart_labels = [f'{h:02d}:00' for h in range(24)]
-
-        def hourly(day):
-            qs = (
-                sale_items_revenue(day, day)
-                .annotate(hr=TruncHour('sale__created_at', tzinfo=local_tz))
-                .values('hr')
-                .annotate(rev=Sum(F('quantity') * F('unit_price')))
-            )
-            m = {timezone.localtime(r['hr']).hour: float(r['rev']) for r in qs}
-            return [m.get(h, 0) for h in range(24)]
-
-        chart_curr = hourly(curr_start)
-        chart_prev = hourly(prev_start)
+        by_hour_curr = revenue_by(curr_sales_list, lambda t: t.hour)
+        by_hour_prev = revenue_by(prev_sales_list, lambda t: t.hour)
+        chart_curr = [by_hour_curr.get(h, 0) for h in range(24)]
+        chart_prev = [by_hour_prev.get(h, 0) for h in range(24)]
 
     elif mode == 'weekly':
         # One bar per day of the week
-        chart_labels = []
-        d = curr_start
-        while d <= curr_end:
-            chart_labels.append(d.strftime('%a %d'))
-            d += timedelta(days=1)
-
-        def weekly_daily(start, end):
-            qs = (
-                sale_items_revenue(start, end)
-                .annotate(day=TruncDate('sale__created_at', tzinfo=local_tz))
-                .values('day')
-                .annotate(rev=Sum(F('quantity') * F('unit_price')))
-            )
-            m = {r['day']: float(r['rev']) for r in qs}
-            result, d = [], start
-            while d <= end:
-                result.append(m.get(d, 0))
-                d += timedelta(days=1)
-            return result
-
-        chart_curr = weekly_daily(curr_start, curr_end)
-        chart_prev = weekly_daily(prev_start, prev_end)
+        days_curr = [curr_start + timedelta(days=i) for i in range(7)]
+        days_prev = [prev_start + timedelta(days=i) for i in range(7)]
+        chart_labels = [d.strftime('%a %d') for d in days_curr]
+        by_day_curr = revenue_by(curr_sales_list, lambda t: t.date())
+        by_day_prev = revenue_by(prev_sales_list, lambda t: t.date())
+        chart_curr = [by_day_curr.get(d, 0) for d in days_curr]
+        chart_prev = [by_day_prev.get(d, 0) for d in days_prev]
 
     else:  # monthly
         days_curr = calendar.monthrange(curr_start.year, curr_start.month)[1]
         days_prev = calendar.monthrange(prev_start.year, prev_start.month)[1]
         max_days = max(days_curr, days_prev)
         chart_labels = [str(d) for d in range(1, max_days + 1)]
+        by_day_curr = revenue_by(curr_sales_list, lambda t: t.day)
+        by_day_prev = revenue_by(prev_sales_list, lambda t: t.day)
+        # Pad the shorter month with None so it shows a gap
+        chart_curr = [by_day_curr.get(d, 0) for d in range(1, days_curr + 1)] + [None] * (max_days - days_curr)
+        chart_prev = [by_day_prev.get(d, 0) for d in range(1, days_prev + 1)] + [None] * (max_days - days_prev)
 
-        def monthly_daily(year, month, total_days):
-            qs = (
-                sale_items_revenue(date(year, month, 1),
-                                   date(year, month, calendar.monthrange(year, month)[1]))
-                .annotate(day=TruncDate('sale__created_at', tzinfo=local_tz))
-                .values('day')
-                .annotate(rev=Sum(F('quantity') * F('unit_price')))
-            )
-            m = {r['day'].day: float(r['rev']) for r in qs}
-            data = [m.get(d, 0) for d in range(1, total_days + 1)]
-            # Pad shorter month with None so Chart.js shows gap
-            return data + [None] * (max_days - total_days)
-
-        chart_curr = monthly_daily(curr_start.year, curr_start.month, days_curr)
-        chart_prev = monthly_daily(prev_start.year, prev_start.month, days_prev)
+    # ── Chart rows for the server-rendered column chart ──────────
+    peak = max([v or 0 for v in chart_curr] + [v or 0 for v in chart_prev] + [0]) or 1
+    chart_rows = []
+    for i, (label, curr_v, prev_v) in enumerate(zip(chart_labels, chart_curr, chart_prev)):
+        if mode == 'daily':
+            show_label = i % 3 == 0
+        elif mode == 'monthly':
+            show_label = i == 0 or (i + 1) % 5 == 0
+        else:
+            show_label = True
+        chart_rows.append({
+            'label': label,
+            'show_label': show_label,
+            'curr': curr_v,
+            'prev': prev_v,
+            'curr_pct': round((curr_v or 0) / peak * 100, 1),
+            'prev_pct': round((prev_v or 0) / peak * 100, 1),
+        })
+    chart_has_data = any(v for v in chart_curr if v) or any(v for v in chart_prev if v)
 
     # ── CSV Export ────────────────────────────────────────────────
     if request.GET.get('export') == 'csv':
@@ -328,15 +353,59 @@ def analytics(request):
         writer.writerow(['', '', 'TOTAL', curr_revenue, ''])
         return response
 
-    # ── Pagination ────────────────────────────────────────────────
-    paginator = Paginator(curr_sales_list, 11)
-    page_obj = paginator.get_page(request.GET.get('page', 1))
+    # ── Top products and payment mix for the period ───────────────
+    totals_by_product = {}
+    for row in (SaleItem.objects
+                .filter(sale__status='completed', sale__created_at__date__gte=curr_start,
+                        sale__created_at__date__lte=curr_end)
+                .values('product__name')
+                .annotate(qty=Sum('quantity'), rev=Sum(F('quantity') * F('unit_price')))):
+        totals_by_product[row['product__name']] = {'qty': row['qty'], 'rev': row['rev']}
+    for sale in curr_sales_list:
+        if getattr(sale, 'is_archived', False):
+            for item in sale.items.all():
+                row = totals_by_product.setdefault(item.product_name, {'qty': 0, 'rev': 0})
+                row['qty'] += item.quantity
+                row['rev'] += item.subtotal
+    top_products = sorted(
+        ({'product__name': name, **vals} for name, vals in totals_by_product.items()),
+        key=lambda p: -p['rev'],
+    )[:5]
+    top_peak = max([float(p['rev'] or 0) for p in top_products] + [0]) or 1
+    for p in top_products:
+        p['pct'] = round(float(p['rev'] or 0) / top_peak * 100, 1)
+
+    method_names = dict(Sale.PAYMENT_METHODS)
+    mix = {}
+    for sale in curr_sales_list:
+        row = mix.setdefault(sale.payment_method, {'label': method_names.get(sale.payment_method, sale.payment_method), 'count': 0, 'amount': 0})
+        row['count'] += 1
+        row['amount'] += sale.total
+    payment_mix = sorted(mix.values(), key=lambda r: -r['amount'])
+    for row in payment_mix:
+        row['pct'] = round(float(row['amount']) / float(curr_revenue) * 100, 1) if curr_revenue else 0
+
+    # ── Step to the previous / next period ────────────────────────
+    if mode == 'daily':
+        step_prev = f"mode=daily&day={prev_start:%Y-%m-%d}"
+        step_next = f"mode=daily&day={curr_start + timedelta(days=1):%Y-%m-%d}"
+        is_current = curr_start >= today
+    elif mode == 'weekly':
+        step_prev = f"mode=weekly&week={prev_start:%G-W%V}"
+        step_next = f"mode=weekly&week={curr_start + timedelta(weeks=1):%G-W%V}"
+        is_current = curr_end >= today
+    else:
+        nxt = curr_end + timedelta(days=1)
+        step_prev = f"mode=monthly&month={prev_start.month}&year={prev_start.year}"
+        step_next = f"mode=monthly&month={nxt.month}&year={nxt.year}"
+        is_current = curr_end >= today
 
     # ── Month/year dropdowns (for monthly filter UI) ──────────────
     months = [{'value': i, 'label': datetime(2000, i, 1).strftime('%B')} for i in range(1, 13)]
-    years = list(range(now.year - 3, now.year + 1))
+    years = list(range(min(now.year - 3, oldest_year or now.year), now.year + 1))
 
     return render(request, 'reports/analytics.html', {
+        'archive_unavailable': archive_unavailable,
         'mode': mode,
         'modes': modes,
         'period_label': period_label,
@@ -352,15 +421,18 @@ def analytics(request):
         'curr_avg': round(curr_avg, 2),
         'prev_avg': round(prev_avg, 2),
         'avg_delta': avg_delta,
+        'curr_items': curr_items,
+        'prev_items': prev_items,
+        'items_delta': items_delta,
+        'top_products': top_products,
+        'payment_mix': payment_mix,
+        'step_prev': step_prev,
+        'step_next': step_next,
+        'is_current': is_current,
 
-        # Chart
-        'chart_labels': json.dumps(chart_labels),
-        'chart_curr': json.dumps(chart_curr),
-        'chart_prev': json.dumps(chart_prev),
-
-        # Table + pagination
-        'sales': page_obj,
-        'page_obj': page_obj,
+        # Chart (server-rendered; no chart library)
+        'chart_rows': chart_rows,
+        'chart_has_data': chart_has_data,
 
         # Filter state
         'selected_date': selected_date,
@@ -436,14 +508,26 @@ def shift_report(request):
     # elsewhere and must not inflate the expected drawer amount.
     total_sales = Decimal('0.00')
     by_method = {}
+    method_counts = {}
     for s in sales_qs.prefetch_related('items'):
         sale_total = s.total if isinstance(s.total, Decimal) else Decimal(str(s.total))
         total_sales += sale_total
         by_method[s.payment_method] = by_method.get(s.payment_method, Decimal('0.00')) + sale_total
+        method_counts[s.payment_method] = method_counts.get(s.payment_method, 0) + 1
+    method_labels = dict(Sale.PAYMENT_METHODS)
+    method_rows = [
+        {
+            'label': method_labels.get(method, method),
+            'amount': float(amount),
+            'count': method_counts[method],
+            'pct': round(float(amount) / float(total_sales) * 100, 1) if total_sales else 0,
+            'is_cash': method == 'cash',
+        }
+        for method, amount in sorted(by_method.items(), key=lambda kv: -kv[1])
+    ]
 
     cash_sales = by_method.pop('cash', Decimal('0.00'))
     non_cash_sales = total_sales - cash_sales
-    method_labels = dict(Sale.PAYMENT_METHODS)
     non_cash_breakdown = [
         {'label': method_labels.get(method, method), 'amount': float(amount)}
         for method, amount in sorted(by_method.items(), key=lambda kv: -kv[1])
@@ -470,9 +554,19 @@ def shift_report(request):
     else:
         cashiers = User.objects.filter(pk=request.user.pk)  # Only themselves
 
+    def day_query(day):
+        q = f"day={day:%Y-%m-%d}"
+        if is_admin and cashier_id:
+            q += f"&cashier={cashier_id}"
+        return q
+
     return render(request, 'reports/shift_report.html', {
-        'sales': sales_qs,
         'date_label': date_label,
+        'prev_day_query': day_query(selected_date - timedelta(days=1)),
+        'next_day_query': day_query(selected_date + timedelta(days=1)),
+        'is_today': selected_date >= today,
+        'cashier_name': selected_cashier.username if selected_cashier else '',
+        'method_rows': method_rows,
         'selected_date': date_param,
         'selected_cashier': cashier_id,
         'cashiers': cashiers,

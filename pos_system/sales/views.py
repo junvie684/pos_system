@@ -1,3 +1,4 @@
+import re
 from django.contrib import messages
 from accounts.decorators import manager_or_admin_required, pos_login_required
 from django.db.models import Q
@@ -14,6 +15,7 @@ from django.db.models import Value, IntegerField, Q as DQ
 import json
 import uuid
 from django.utils import timezone
+from django.utils.timesince import timesince
 from django.db.models import Sum, Count
 from django.db.models.functions import TruncDate, Coalesce
 from datetime import timedelta
@@ -26,6 +28,8 @@ import logging
 
 from django.urls import reverse
 from django.views.decorators.http import require_GET
+
+from archive.history import archived_dashboard_totals
 
 logger = logging.getLogger(__name__)
 
@@ -87,28 +91,35 @@ def dashboard(request):
         chart_revenue.append(float(entry['revenue']) if entry else 0)
         chart_txns.append(entry['txns'] if entry else 0)
 
-    # ── Top 5 products by revenue ─────────────────────────────────
+    # ── All-time figures include sales moved to the archive database ──
     from django.db.models import F as Fexpr
-    top_products = (
-        SaleItem.objects
-        .filter(sale__status='completed')
-        .values('product__name')
-        .annotate(revenue=Sum(Fexpr('quantity') * Fexpr('unit_price')))
-        .order_by('-revenue')[:5]
-    )
-    top_product_labels = [p['product__name'] for p in top_products]
-    top_product_values = [float(p['revenue']) for p in top_products]
+    archived = archived_dashboard_totals(Sale.objects.filter(status__in=('completed', 'refunded')))
+    archive_unavailable = archived is None
+    if archived is None:
+        archived = {'products': {}, 'cashiers': {}, 'completed': 0, 'refunded': 0}
 
-    # ── Top 5 products by units sold ─────────────────────────────
-    top_units = (
-        SaleItem.objects
-        .filter(sale__status='completed')
-        .values('product__name')
-        .annotate(units=Sum('quantity'))
-        .order_by('-units')[:5]
-    )
-    top_units_labels = [p['product__name'] for p in top_units]
-    top_units_values = [p['units'] for p in top_units]
+    # ── Top 5 products by revenue / units sold ────────────────────
+    product_totals = {
+        row['product__name']: {'revenue': row['revenue'] or 0, 'units': row['units'] or 0}
+        for row in (
+            SaleItem.objects
+            .filter(sale__status='completed')
+            .values('product__name')
+            .annotate(revenue=Sum(Fexpr('quantity') * Fexpr('unit_price')), units=Sum('quantity'))
+        )
+    }
+    for name, row in archived['products'].items():
+        totals = product_totals.setdefault(name, {'revenue': 0, 'units': 0})
+        totals['revenue'] += row['revenue']
+        totals['units'] += row['units']
+
+    top_products = sorted(product_totals.items(), key=lambda kv: kv[1]['revenue'], reverse=True)[:5]
+    top_product_labels = [name for name, _ in top_products]
+    top_product_values = [float(t['revenue']) for _, t in top_products]
+
+    top_units = sorted(product_totals.items(), key=lambda kv: kv[1]['units'], reverse=True)[:5]
+    top_units_labels = [name for name, _ in top_units]
+    top_units_values = [t['units'] for _, t in top_units]
 
     # ── Low stock products (stock <= 5) ───────────────────────────
     from products.models import Product
@@ -152,13 +163,21 @@ def dashboard(request):
             'sales_count': sales.count(),
             'revenue': rev,
         })
+    by_name = {c['username']: c for c in cashier_data}
+    for username, row in archived['cashiers'].items():
+        entry = by_name.get(username)
+        if entry is None:
+            entry = by_name[username] = {'username': username, 'sales_count': 0, 'revenue': 0}
+            cashier_data.append(entry)
+        entry['sales_count'] += row['sales_count']
+        entry['revenue'] += row['revenue']
     cashier_data.sort(key=lambda x: x['revenue'], reverse=True)
     max_cashier_revenue = cashier_data[0]['revenue'] if cashier_data else 1
 
     # ── Sale status counts ────────────────────────────────────────
     status_counts = {
-        'completed': Sale.objects.filter(status='completed').count(),
-        'refunded':  Sale.objects.filter(status='refunded').count(),
+        'completed': Sale.objects.filter(status='completed').count() + archived['completed'],
+        'refunded':  Sale.objects.filter(status='refunded').count() + archived['refunded'],
         'pending':   Sale.objects.filter(status='pending').count(),
     }
 
@@ -216,6 +235,7 @@ def dashboard(request):
         'refund_rate':        refund_rate,
         'total_sales_count':  total_sales_count,
         'low_stock_count':    low_stock_count,
+        'archive_unavailable': archive_unavailable,
 
         # Charts (JSON for JS)
         'chart_days':         json.dumps(chart_days),
@@ -267,8 +287,13 @@ class CheckoutError(Exception):
     """A checkout problem to show the cashier. The sale transaction is rolled back."""
 
 
+TOP_SELLERS = 20
+
+
 def _pos_screen_context():
-    products = (
+    """Every active product for the POS tiles: the top sellers first (most sold
+    first, each tagged with its rank), then everything else A to Z."""
+    products = list(
         Product.objects
         .filter(is_active=True)
         .select_related('category')
@@ -278,8 +303,14 @@ def _pos_screen_context():
                 Value(0), output_field=IntegerField()
             )
         )
-        .order_by('-total_sold')[:24]
+        .order_by('name')
     )
+    sold = sorted((p for p in products if p.total_sold > 0), key=lambda p: -p.total_sold)
+    top = sold[:TOP_SELLERS]
+    for rank, product in enumerate(top, start=1):
+        product.best_rank = rank
+    top_ids = {p.pk for p in top}
+    products = top + [p for p in products if p.pk not in top_ids]
     return {
         'products': products,
         'customers': Customer.objects.all(),
@@ -500,6 +531,8 @@ def _checkout(request, pending_sale=None):
                 total += product.price * qty
 
             _settle_payment(sale, status, payment_method, tendered_raw, reference, total)
+            if status == 'completed':
+                sale.assign_or_number()
             sale.save()
 
     except CheckoutError as exc:
@@ -521,7 +554,7 @@ def _checkout(request, pending_sale=None):
     if status == 'pending':
         verb = 'updated and kept on hold' if pending_sale else 'saved as pending'
         return _sale_done_response(request, sale, f'Sale #{sale.pk} {verb}.')
-    return _sale_done_response(request, sale, f'Sale #{sale.pk} completed successfully.')
+    return _sale_done_response(request, sale, f'Sale {sale.or_display} completed successfully.')
 
 
 # ─── Product lookup for the POS screen ───────────────────────
@@ -536,7 +569,6 @@ def _product_payload(product):
         'stock': product.stock,
         'barcode': product.barcode or '',
         'category': product.category.name if product.category else '',
-        'image': product.image.url if product.image else '',
     }
 
 
@@ -544,8 +576,8 @@ def _product_payload(product):
 @require_GET
 def product_lookup(request):
     """
-    The POS grid only renders the best sellers, so scans and searches that
-    miss it ask here. `?barcode=` is an exact match; `?q=` searches name,
+    The POS grid renders every active product; scans and searches that miss
+    it (e.g. a product added since the page loaded) ask here. `?barcode=` is an exact match; `?q=` searches name,
     barcode and category. Active products of the current store only.
     """
     barcode = request.GET.get('barcode', '').strip()
@@ -586,7 +618,13 @@ def pending_sales(request):
     else:
         pending = Sale.objects.filter(status='pending', cashier=request.user).order_by('-created_at')
 
-    return render(request, 'sales/pending_sales.html', {'pending_sales': pending})
+    pending = list(pending.select_related('customer', 'cashier').prefetch_related('items__product'))
+    for sale in pending:
+        sale.held_for = timesince(sale.created_at, depth=1)  # "3 hours", not "3 hours, 10 minutes"
+    return render(request, 'sales/pending_sales.html', {
+        'pending_sales': pending,
+        'held_total': sum((sale.total for sale in pending), Decimal('0')),
+    })
 
 
 @pos_login_required
@@ -658,6 +696,14 @@ def delete_pending(request, pk):
 # ─── Sale History ─────────────────────────────────────────────
 from django.core.paginator import Paginator
 
+from archive.history import TimelineList, archived_history, archived_summary
+
+def _or_number_q(query):
+    """Match an OR number typed as "OR-000012", "or12" or "12"."""
+    digits = re.sub(r'^\s*or[\s#-]*', '', query, flags=re.I).strip()
+    return Q(or_number=int(digits)) if digits.isdigit() else Q(pk__in=[])
+
+
 @pos_login_required
 def sale_history(request):
     sales = Sale.objects.filter(status__in=['completed', 'refunded']).order_by('-created_at')
@@ -669,7 +715,8 @@ def sale_history(request):
             Q(customer__name__icontains=query) |
             Q(cashier__username__icontains=query) |
             Q(pk__icontains=query) |
-            Q(status__icontains=query)
+            Q(status__icontains=query) |
+            _or_number_q(query)
         )
 
     # Date filter (shortcuts fill the range)
@@ -719,9 +766,19 @@ def sale_history(request):
     filtered_count = completed.count()
     refunded_count = sales.filter(status='refunded').count()
 
-    paginator = Paginator(sales.prefetch_related('items__product').select_related('customer', 'cashier'), 12)
-    page      = request.GET.get('page')
-    sales     = paginator.get_page(page)
+    # Sales past the retention period live in the archive database; they
+    # follow the main-database sales (they are always older).
+    archived = archived_history(sales, query, d_from, d_to)
+    arch_total, arch_count, arch_refunded = archived_summary(archived)
+    filtered_total += arch_total
+    filtered_count += arch_count
+    refunded_count += arch_refunded
+
+    timeline = TimelineList(
+        sales.order_by('-created_at', '-pk').prefetch_related('items__product').select_related('customer', 'cashier'),
+        archived,
+    )
+    sales = Paginator(timeline, 25).get_page(request.GET.get('page'))
 
     return render(request, 'sales/history.html', {
         'sales':          sales,
@@ -733,6 +790,7 @@ def sale_history(request):
         'filtered_count': filtered_count,
         'refunded_count': refunded_count,
         'scope_label':    scope_label,
+        'archive_unavailable': archived is None,
     })
 
 # ─── Refund/Void ─────────────────────────────────────────────
@@ -743,7 +801,7 @@ def refund_sale(request, pk):
 
     if sale.status != 'completed':
         # Pending sales never deducted stock; refunded ones already restored it.
-        messages.error(request, f'Sale #{sale.pk} is {sale.get_status_display().lower()} and cannot be refunded.')
+        messages.error(request, f'Sale {sale} is {sale.get_status_display().lower()} and cannot be refunded.')
         return redirect('sales:sale_history')
 
     if request.method == 'POST':
@@ -758,9 +816,9 @@ def refund_sale(request, pk):
                     Product.objects.filter(pk=item.product_id).update(stock=F('stock') + item.quantity)
 
         if not claimed:
-            messages.error(request, f'Sale #{sale.pk} was already refunded.')
+            messages.error(request, f'Sale {sale} was already refunded.')
         else:
-            messages.success(request, f'Sale #{sale.pk} has been refunded and stock restored.')
+            messages.success(request, f'Sale {sale} has been refunded and stock restored.')
         return redirect('sales:sale_history')
 
     return render(request, 'sales/refund_confirm.html', {'sale': sale})

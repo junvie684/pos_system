@@ -1,0 +1,25 @@
+{# Sidebar user menu: full name, role, and a dropdown with Sign out. Pass role_label and logout_url. #}
+{% with full_name=user.get_full_name %}
+<div class="user-menu" id="userMenu">
+  <button type="button" class="user-pill" id="userMenuBtn" aria-haspopup="true" aria-expanded="false" aria-controls="userMenuList">
+    <span class="user-avatar" aria-hidden="true">{% if user.first_name %}{{ user.first_name|first|upper }}{{ user.last_name|first|upper }}{% else %}{{ user.username|first|upper }}{% endif %}</span>
+    <span class="user-meta">
+      <span class="user-name">{{ full_name|default:user.username }}</span>
+      <span class="user-role">{{ role_label }}</span>
+    </span>
+    <i class="bi bi-chevron-up user-caret" aria-hidden="true"></i>
+  </button>
+  <div class="user-dropdown" id="userMenuList" role="menu" aria-labelledby="userMenuBtn" hidden>
+    <div class="user-dropdown-head">
+      <span class="user-dropdown-name">{{ full_name|default:user.username }}</span>
+      <span class="user-dropdown-sub">@{{ user.username }}</span>
+    </div>
+    <form method="post" action="{{ logout_url }}">
+      {% csrf_token %}
+      <button type="submit" class="user-dropdown-item is-danger" role="menuitem">
+        <i class="bi bi-box-arrow-right" aria-hidden="true"></i> Sign out
+      </button>
+    </form>
+  </div>
+</div>
+{% endwith %}

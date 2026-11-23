@@ -51,3 +51,46 @@ def total_of(sales_qs):
     return SaleItem.objects.filter(sale__in=sales_qs.values('pk')).aggregate(
         t=Coalesce(Sum(F('quantity') * F('unit_price')), Value(ZERO))
     )['t']
+
+
+# ── Archived sales (pos_archive database) ───────────────────────
+# Same rules as above, for sales moved out of the main database. They are
+# read separately (the two databases can't be joined) and merged in Python.
+
+def archived_sales_made(start, end):
+    from archive.models import ArchivedSale
+    return ArchivedSale.objects.filter(
+        status__in=SOLD_STATUSES, created_at__date__gte=start, created_at__date__lte=end,
+    )
+
+
+def archived_refunds_given(start, end):
+    from archive.models import ArchivedSale
+    return (
+        ArchivedSale.objects.filter(status='refunded')
+        .annotate(refund_time=Coalesce('refunded_at', 'created_at', output_field=DateTimeField()))
+        .filter(refund_time__date__gte=start, refund_time__date__lte=end)
+    )
+
+
+def archived_total(qs):
+    return qs.aggregate(t=Coalesce(Sum('total'), Value(ZERO)))['t']
+
+
+def archived_completed(start, end, main_qs):
+    """Completed archived sales between two local dates, with their lines,
+    skipping any that are also in `main_qs` (a run that stopped mid-move)."""
+    from archive.models import ArchivedSale
+    qs = ArchivedSale.objects.filter(
+        status='completed', created_at__date__gte=start, created_at__date__lte=end,
+    ).prefetch_related('items')
+    if not qs.exists():
+        return []
+    in_main = set(main_qs.values_list('pk', flat=True))
+    return [sale for sale in qs if sale.pk not in in_main]
+
+
+def oldest_archived_year():
+    from archive.models import ArchivedSale
+    first = ArchivedSale.objects.order_by('created_at').values_list('created_at', flat=True).first()
+    return first.year if first else None

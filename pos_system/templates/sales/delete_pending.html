@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Delete held sale #{{ sale.pk }} — POS{% endblock %}
+{% block page_title %}Pending Sales{% endblock %}
+{% block content %}
+<main class="confirm-wrap" data-cashier-screen="delete-held-sale">
+  <form method="post" class="card confirm-card" aria-labelledby="delete-held-title">
+    {% csrf_token %}
+    <h1 id="delete-held-title">Delete held sale <span class="serial">#{{ sale.pk }}</span>?</h1>
+    <p class="meta"><span class="fig">{{ sale.created_at|date:"M d, Y H:i" }}</span> · {{ sale.cashier }}{% if sale.customer %} · {{ sale.customer }}{% endif %}</p>
+    <div class="lines">
+      {% for item in sale.items.all %}
+      <div class="line"><span>{{ item.product.name }}</span><span class="fig">×{{ item.quantity }}</span></div>
+      {% endfor %}
+    </div>
+    <p class="modal-text note">The held sale and its items are removed. No stock changes, because a held sale never deducted any.</p>
+    <div class="confirm-actions">
+      <a href="{% url 'sales:pending_sales' %}" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-danger"><i class="bi bi-trash" aria-hidden="true"></i> Delete held sale</button>
+    </div>
+  </form>
+</main>
+<style>
+.confirm-wrap { display: flex; justify-content: center; padding-top: 4vh; }
+.confirm-card { width: 100%; max-width: 480px; }
+.confirm-card h1 { font-size: 20px; font-weight: 800; }
+.serial { font-family: var(--font-fig); color: var(--red); letter-spacing: .5px; }
+.meta { font-size: 14px; color: var(--ink-2); margin-top: 4px; }
+.meta .fig { font-size: 13px; }
+.lines { margin-top: 14px; border-top: 1px solid var(--rule); }
+.line { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--rule-strong); font-size: 14px; }
+.line .fig { color: var(--ink-2); }
+.note { margin: 16px 0; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+</style>
+{% endblock %}

@@ -23,6 +23,7 @@ class RefundLedgerTests(TestCase):
     Mar 11: manager refunds A and D; sale B (cash ₱50) is made.
     Mar 9:  legacy sale C (cash ₱150) refunded before refund dates were recorded.
     """
+    databases = {'default', 'archive'}   # reports also read the archive database
 
     def setUp(self):
         self.tenant = make_tenant('store-a')
@@ -131,3 +132,64 @@ class ShiftReportCashSplitTests(TestCase):
     def test_expected_drawer_is_starting_cash_plus_cash_sales_minus_collection(self):
         self.assertEqual(Decimal(str(self.ctx['total_gross'])), Decimal('600'))   # 500 + 100
         self.assertEqual(Decimal(str(self.ctx['net_amount'])), Decimal('560'))    # 600 - 40
+
+
+# ─── Analytics page ─────────────────────────────────────────────
+class AnalyticsPageTests(TestCase):
+    """Today: two cash sales of Soap and one GCash sale of Rice. Yesterday: one Soap sale."""
+    databases = {'default', 'archive'}   # analytics also reads the archive database
+
+    def setUp(self):
+        self.tenant = make_tenant('store-a')
+        self.manager = make_user(self.tenant, 'manager1', role='manager')
+        soap = make_product(self.tenant, name='Soap', price='50.00', stock=100)
+        rice = make_product(self.tenant, name='Rice', price='200.00', stock=100)
+        make_sale(self.tenant, self.manager, soap, qty=2)
+        make_sale(self.tenant, self.manager, soap, qty=1)
+        gcash = make_sale(self.tenant, self.manager, rice, qty=1)
+        Sale.all_objects.filter(pk=gcash.pk).update(payment_method='gcash')
+        old = make_sale(self.tenant, self.manager, soap, qty=1)
+        Sale.all_objects.filter(pk=old.pk).update(created_at=timezone.now() - timezone.timedelta(days=1))
+        pos_login(self.client, self.manager)
+
+    def test_every_mode_renders(self):
+        for mode in ('daily', 'weekly', 'monthly'):
+            with self.subTest(mode=mode):
+                self.assertEqual(self.client.get('/reports/analytics/', {'mode': mode}).status_code, 200)
+
+    def test_daily_figures_top_products_and_payment_mix(self):
+        ctx = self.client.get('/reports/analytics/', {'mode': 'daily'}).context
+        self.assertEqual(ctx['curr_count'], 3)
+        self.assertEqual(ctx['curr_items'], 4)
+        self.assertEqual(ctx['prev_items'], 1)
+        self.assertEqual(ctx['curr_revenue'], dec(350))
+        self.assertEqual([p['product__name'] for p in ctx['top_products']], ['Rice', 'Soap'])
+        mix = {m['label']: m for m in ctx['payment_mix']}
+        self.assertEqual(mix['Cash']['count'], 2)
+        self.assertEqual(mix['Cash']['amount'], dec(150))
+        self.assertEqual(mix['GCash']['amount'], dec(200))
+        self.assertTrue(ctx['is_current'])
+
+
+class CashClosingPageTests(TestCase):
+    def setUp(self):
+        self.tenant = make_tenant('store-a')
+        self.manager = make_user(self.tenant, 'manager1', role='manager')
+        self.cashier = make_user(self.tenant, 'cashier1')
+        soap = make_product(self.tenant, name='Soap', price='50.00', stock=100)
+        make_sale(self.tenant, self.cashier, soap, qty=2)
+        gcash = make_sale(self.tenant, self.cashier, soap, qty=1)
+        Sale.all_objects.filter(pk=gcash.pk).update(payment_method='gcash')
+        pos_login(self.client, self.manager)
+
+    def test_names_the_cashier_and_breaks_down_methods(self):
+        resp = self.client.get('/reports/shift_report/', {'cashier': self.cashier.pk, 'starting_cash': '500'})
+        ctx = resp.context
+        self.assertEqual(ctx['cashier_name'], 'cashier1')
+        self.assertContains(resp, 'Cashier: cashier1')
+        rows = {r['label']: r for r in ctx['method_rows']}
+        self.assertEqual(rows['Cash']['amount'], 100.0)
+        self.assertTrue(rows['Cash']['is_cash'])
+        self.assertEqual(rows['GCash']['count'], 1)
+        self.assertEqual(ctx['net_amount'], 600.0)
+        self.assertNotContains(resp, '<table')

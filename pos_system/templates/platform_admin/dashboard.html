@@ -1,171 +1,263 @@
 {% extends 'platform_admin/base.html' %}
-{% block page_title %}Dashboard{% endblock %}
+{% block title %}All stores — Platform{% endblock %}
+{% block page_title %}All stores{% endblock %}
 
 {% block topbar_actions %}
   {% if perms.tenants.add_tenant %}
-    <button class="btn btn-primary btn-sm" onclick="openModal('newStoreModal')">
-      <i class="bi bi-plus-circle"></i> New Store
-    </button>
+  <button type="button" class="btn btn-primary" onclick="openModal('newStoreModal')">
+    <i class="bi bi-plus-lg" aria-hidden="true"></i> <span class="btn-text">New store</span>
+  </button>
   {% endif %}
 {% endblock %}
 
 {% block content %}
-
-<div class="stat-grid">
-  <div class="stat-card green">
-    <div class="stat-label">Total Stores</div>
-    <div class="stat-value">{{ total_stores }}</div>
-    <i class="bi bi-shop stat-icon"></i>
+<div class="st-toolbar">
+  <div class="st-search">
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <label for="st-q" class="sr-only">Search stores</label>
+    <input type="search" id="st-q" placeholder="Search name, slug or owner" autocomplete="off" spellcheck="false">
   </div>
-  <div class="stat-card blue">
-    <div class="stat-label">Active Stores</div>
-    <div class="stat-value">{{ active_stores }}</div>
-    <i class="bi bi-check-circle stat-icon"></i>
+  <div class="chips st-filter" role="group" aria-label="Filter by status">
+    <button type="button" class="chip is-on" data-status="" aria-pressed="true">All <span class="chip-n fig">{{ total_stores }}</span></button>
+    <button type="button" class="chip" data-status="active" aria-pressed="false">Active <span class="chip-n fig">{{ active_stores }}</span></button>
+    <button type="button" class="chip" data-status="inactive" aria-pressed="false">Deactivated <span class="chip-n fig">{{ inactive_stores }}</span></button>
   </div>
 </div>
 
-<div class="card" style="padding:0">
+<div class="card table-card st-card">
   <div class="table-wrap">
-    <table>
+    <table class="st-table">
       <thead>
         <tr>
-          <th>Store</th>
-          <th>Slug</th>
-          <th>Owner</th>
-          <th>Users</th>
-          <th>Sales</th>
-          <th>Products</th>
-          <th>Status</th>
-          <th>Registered</th>
-          <th></th>
+          <th scope="col">Store</th>
+          <th scope="col">Owner</th>
+          <th scope="col" class="num">Users</th>
+          <th scope="col" class="num">Products</th>
+          <th scope="col" class="num">Sales</th>
+          <th scope="col">Last sale</th>
+          <th scope="col">Status</th>
+          <th scope="col"><span class="sr-only">Open</span></th>
         </tr>
       </thead>
       <tbody>
-        {% for s in stats %}
-        <tr>
-          <td class="strong">{{ s.tenant.name }}</td>
-          <td><code style="color:var(--text3);font-size:12px">{{ s.tenant.slug }}</code></td>
-          <td>{{ s.tenant.owner }}</td>
-          <td>{{ s.user_count }}</td>
-          <td>{{ s.sale_count }}</td>
-          <td>{{ s.product_count }}</td>
-          <td>
-            {% if s.tenant.is_active %}
-              <span class="badge badge-green">Active</span>
-            {% else %}
-              <span class="badge badge-gray">Inactive</span>
-            {% endif %}
+        {% for store in stores %}
+        {% url 'platform_admin:store_detail' store.id as store_url %}
+        <tr class="st-row{% if not store.is_active %} is-off{% endif %}" data-href="{{ store_url }}"
+            data-status="{{ store.is_active|yesno:'active,inactive' }}"
+            data-search="{{ store.name|lower }} {{ store.slug|lower }} {{ store.owner|lower }}">
+          <td class="st-store">
+            <a href="{{ store_url }}" class="st-name">{{ store.name }}</a>
+            <span class="st-slug fig">{{ store.slug }}</span>
           </td>
-          <td>{{ s.tenant.created_at|date:"M d, Y" }}</td>
-          <td>
-            <a href="{% url 'platform_admin:store_detail' s.tenant.id %}"
-               style="display:inline-flex;align-items:center;gap:6px;padding:5px 11px;
-                      border-radius:8px;font-size:12px;font-weight:500;
-                      background:rgba(255,255,255,0.06);color:var(--text2);
-                      border:1px solid var(--border);text-decoration:none;
-                      transition:all .15s"
-               onmouseover="this.style.background='rgba(255,255,255,0.1)';this.style.color='var(--text)'"
-               onmouseout="this.style.background='rgba(255,255,255,0.06)';this.style.color='var(--text2)'">
-              Manage
-            </a>
-          </td>
+          <td class="st-owner" title="{{ store.owner }}">{{ store.owner }}</td>
+          <td class="num fig">{{ store.user_count }}</td>
+          <td class="num fig">{{ store.product_count }}</td>
+          <td class="num fig">{{ store.sale_count }}</td>
+          <td class="st-when fig">{% if store.last_sale_at %}<time datetime="{{ store.last_sale_at|date:'c' }}" title="{{ store.last_sale_at|date:'M j, Y H:i' }}">{{ store.last_sale_at|date:"M j, Y" }}</time>{% else %}<span class="st-none">No sales yet</span>{% endif %}</td>
+          <td><span class="st-status">{{ store.is_active|yesno:"Active,Deactivated" }}</span></td>
+          <td class="st-go"><i class="bi bi-chevron-right" aria-hidden="true"></i></td>
         </tr>
         {% empty %}
-        <tr>
-          <td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">
-            No stores registered yet.
-          </td>
-        </tr>
+        <tr><td colspan="8" class="empty-cell">
+          <i class="bi bi-shop" aria-hidden="true"></i>
+          No stores yet.{% if perms.tenants.add_tenant %} Create the first one with New store.{% endif %}
+        </td></tr>
         {% endfor %}
+        {% if stores %}
+        <tr id="st-nomatch" hidden><td colspan="8" class="empty-cell">
+          <i class="bi bi-search" aria-hidden="true"></i>
+          No store matches. Check the spelling or clear the search.
+        </td></tr>
+        {% endif %}
       </tbody>
     </table>
   </div>
+  {% if stores %}
+  <div class="st-foot" id="st-count"><span class="fig">{{ total_stores }}</span> store{{ total_stores|pluralize }}</div>
+  {% endif %}
 </div>
 
+<style>
+.st-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.st-search { position: relative; flex: 0 1 320px; min-width: 240px; }
+.st-search > .bi { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font-size: 14px; pointer-events: none; }
+.st-search input {
+  width: 100%; height: 38px; padding: 0 12px 0 34px;
+  background: var(--panel); border: 1px solid var(--rule-strong); border-radius: var(--radius);
+  font: 14.5px var(--font-ui); color: var(--ink); outline: none;
+  transition: border-color .12s, box-shadow .12s;
+}
+.st-search input::placeholder { color: #7A8191; }
+.st-search input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px var(--carbon); }
+.st-filter .chip { height: 38px; padding: 0 12px; font-size: 13.5px; }
+.chip-n { font-size: 12.5px; color: var(--ink-3); }
+.chip.is-on .chip-n { color: var(--rail-ink-muted); }
+
+.st-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.st-table th { padding: 9px 12px; }
+.st-table td { padding: 8px 12px; vertical-align: middle; }
+.st-row { cursor: pointer; }
+.st-row:hover td { background: var(--paper); }
+.st-store { min-width: 180px; }
+.st-name { display: block; font-weight: 600; color: var(--ink); text-decoration: none; line-height: 1.3; }
+.st-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.st-name:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+.st-slug { display: block; font-size: 11.5px; color: var(--ink-3); line-height: 1.35; }
+.st-owner { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.st-when { white-space: nowrap; font-size: 13px; color: var(--ink-2); }
+.st-none { font-family: var(--font-ui); color: var(--ink-3); }
+.st-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.st-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.is-off .st-status { color: var(--ink-3); }
+.is-off .st-status::before { background: var(--rule-strong); }
+.is-off .st-name { color: var(--ink-2); }
+.st-go { width: 1%; color: var(--ink-3); text-align: right; }
+.st-row:hover .st-go { color: var(--ink); }
+.st-foot { padding: 10px 20px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--ink-2); }
+
+.st-card { container-type: inline-size; }
+@media (max-width: 760px) {
+  .st-search { flex-basis: 100%; min-width: 0; }
+}
+/* Stack rows by the table's own width, so it also fits beside an open rail. */
+@container (max-width: 820px) {
+  .st-table thead { display: none; }
+  .st-table, .st-table tbody, .st-table tr, .st-table td { display: block; }
+  .st-table tr.st-row { display: flex; flex-wrap: wrap; align-items: baseline; row-gap: 3px; padding: 12px 16px; border-bottom: 1px solid var(--rule); }
+  .st-table td { padding: 0 !important; border: 0; text-align: left; }
+  .st-table td.st-store { order: 1; flex: 1 1 0; min-width: 0; }
+  .st-table td:nth-child(7) { order: 2; margin-left: 12px; }
+  .st-table td.st-owner { order: 3; flex-basis: 100%; max-width: none; font-size: 13.5px; }
+  .st-table td:nth-child(3), .st-table td:nth-child(4), .st-table td:nth-child(5), .st-table td.st-when { order: 4; font-size: 13px; color: var(--ink-2); }
+  .st-table td:nth-child(3)::after { content: ' users · '; font-family: var(--font-ui); white-space: pre; }
+  .st-table td:nth-child(4)::after { content: ' products · '; font-family: var(--font-ui); white-space: pre; }
+  .st-table td:nth-child(5)::after { content: ' sales · '; font-family: var(--font-ui); white-space: pre; }
+  .st-table td.st-when::before { content: 'last sale '; font-family: var(--font-ui); }
+  .st-table td.st-when:has(.st-none)::before { content: none; }
+  .st-table td.st-go { display: none; }
+}
+.st-table tr[hidden] { display: none !important; }
+</style>
+
+<script>
+(function () {
+  const rows = [...document.querySelectorAll('.st-row')];
+  if (!rows.length) return;
+  const q = document.getElementById('st-q');
+  const chips = [...document.querySelectorAll('.st-filter .chip')];
+  const none = document.getElementById('st-nomatch');
+  const count = document.getElementById('st-count');
+  let status = '';
+
+  function apply() {
+    const term = q.value.trim().toLowerCase();
+    let shown = 0;
+    rows.forEach(r => {
+      const ok = (!status || r.dataset.status === status) && (!term || r.dataset.search.includes(term));
+      r.hidden = !ok;
+      if (ok) shown++;
+    });
+    none.hidden = shown > 0;
+    const filtered = shown !== rows.length;
+    count.innerHTML = '<span class="fig">' + shown + '</span>' +
+      (filtered ? ' of <span class="fig">' + rows.length + '</span>' : '') +
+      ' store' + ((filtered ? rows.length : shown) === 1 ? '' : 's');
+  }
+  q.addEventListener('input', apply);
+  chips.forEach(c => c.addEventListener('click', () => {
+    status = c.dataset.status;
+    chips.forEach(x => { x.classList.toggle('is-on', x === c); x.setAttribute('aria-pressed', String(x === c)); });
+    apply();
+  }));
+
+  // The whole row opens the store; the name stays a real link for keyboard and new-tab use.
+  rows.forEach(r => r.addEventListener('click', e => {
+    if (e.target.closest('a') || String(window.getSelection())) return;
+    if (e.metaKey || e.ctrlKey) { window.open(r.dataset.href, '_blank'); return; }
+    location.href = r.dataset.href;
+  }));
+})();
+</script>
 {% endblock content %}
 
 {% block modals %}
-<!-- ══════════════ NEW STORE MODAL ══════════════ -->
-<div class="modal-backdrop" id="newStoreModal">
-  <div class="modal-box" style="max-width:620px">
+<div class="modal-backdrop" id="newStoreModal" role="dialog" aria-modal="true" aria-labelledby="new-store-title">
+  <div class="modal-box new-store-box">
     <form method="post" action="{% url 'platform_admin:create_store' %}">
       {% csrf_token %}
       <div class="modal-header">
-        <div style="font-size:14px;font-weight:600;color:var(--text)">
-          <i class="bi bi-shop" style="color:var(--accent);margin-right:6px"></i>
-          Create New Store
-        </div>
-        <button type="button" class="modal-close" onclick="closeModal('newStoreModal')">
-          <i class="bi bi-x-lg"></i>
-        </button>
+        <span class="modal-title" id="new-store-title">New store</span>
+        <button type="button" class="modal-close" onclick="closeModal('newStoreModal')" aria-label="Close"><i class="bi bi-x-lg"></i></button>
       </div>
       <div class="modal-body">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;--form-gap:12px">
-
-          <!-- Row 1: Store Name (full width) -->
-          <div class="form-group" style="grid-column:1/-1">
-            <label class="form-label">Store Name</label>
-            <input type="text" name="name" class="form-control" placeholder="e.g. Downtown Branch" required>
+        <div class="form-grid">
+          <div class="form-group span-2">
+            <label class="form-label" for="ns-name">Store name</label>
+            <input type="text" id="ns-name" name="name" class="form-control" placeholder="Downtown Branch" required>
           </div>
-
-          <!-- Row 2: Slug (full width) -->
-          <div class="form-group" style="grid-column:1/-1">
-            <label class="form-label">Slug <span style="color:var(--text3)">(auto-generated if empty)</span></label>
-            <input type="text" name="slug" class="form-control" placeholder="e.g. downtown-branch">
+          <div class="form-group span-2">
+            <label class="form-label" for="ns-slug">Slug <span class="opt">optional, used in the price-check link</span></label>
+            <input type="text" id="ns-slug" name="slug" class="form-control" placeholder="downtown-branch">
           </div>
-
-          <!-- Row 3: Address (full width) -->
-          <div class="form-group" style="grid-column:1/-1">
-            <label class="form-label">Address</label>
-            <input type="text" name="address" class="form-control" placeholder="e.g. 123 Main St, Cebu City">
-          </div>
-
-          <!-- Row 4: Phone | TIN -->
-          <div class="form-group">
-            <label class="form-label">Phone</label>
-            <input type="text" name="phone" class="form-control" placeholder="e.g. 032-123-4567">
+          <div class="form-group span-2">
+            <label class="form-label" for="ns-address">Address</label>
+            <input type="text" id="ns-address" name="address" class="form-control" placeholder="Street and city, as printed on receipts">
           </div>
           <div class="form-group">
-            <label class="form-label">TIN</label>
-            <input type="text" name="tin" class="form-control" placeholder="e.g. 123-456-789-000">
-          </div>
-
-          <!-- Row 5: Owner Email | Owner Password -->
-          <div class="form-group">
-            <label class="form-label">Owner Email</label>
-            <input type="email" name="owner_email" class="form-control" placeholder="owner@example.com" required>
+            <label class="form-label" for="ns-phone">Phone</label>
+            <input type="text" id="ns-phone" name="phone" class="form-control">
           </div>
           <div class="form-group">
-            <label class="form-label">Owner Password</label>
-            <input type="password" name="owner_password" class="form-control" placeholder="Set owner password" required>
+            <label class="form-label" for="ns-tin">TIN</label>
+            <input type="text" id="ns-tin" name="tin" class="form-control fig">
           </div>
-
+          <div class="form-group">
+            <label class="form-label" for="ns-email">Owner email</label>
+            <input type="email" id="ns-email" name="owner_email" class="form-control" required autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ns-pw">Owner password</label>
+            <input type="password" id="ns-pw" name="owner_password" class="form-control" required autocomplete="new-password">
+          </div>
         </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-ghost" onclick="closeModal('newStoreModal')">Cancel</button>
-        <button type="submit" class="btn btn-primary">
-          <i class="bi bi-plus-circle"></i> Create Store
-        </button>
+        <button type="submit" class="btn btn-primary">Create store</button>
       </div>
     </form>
   </div>
 </div>
 
+<style>
+.new-store-box { max-width: 620px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.form-grid .span-2 { grid-column: 1 / -1; }
+.opt { font-weight: 400; color: var(--ink-3); margin-left: 4px; }
+.modal-footer { justify-content: flex-end; }
+@media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+</style>
+
 <script>
-  function openModal(id) {
-    document.getElementById(id).classList.add('open');
-  }
-  function closeModal(id) {
-    document.getElementById(id).classList.remove('open');
-  }
-
-  // Close on backdrop click
-  document.querySelectorAll('.modal-backdrop').forEach(el => {
-    el.addEventListener('click', function(e) {
-      if (e.target === this) closeModal(this.id);
-    });
-  });
+let lastFocus = null;
+function openModal(id) {
+  lastFocus = document.activeElement;
+  const dlg = document.getElementById(id);
+  dlg.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  const first = dlg.querySelector('input:not([type=hidden])');
+  if (first) first.focus();
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+  document.body.style.overflow = '';
+  if (lastFocus) lastFocus.focus();
+}
+document.querySelectorAll('.modal-backdrop').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) closeModal(el.id); });
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop.open').forEach(el => closeModal(el.id));
+});
 </script>
-
 {% endblock modals %}

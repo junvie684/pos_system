@@ -1,23 +1,33 @@
 {% extends 'platform_admin/base.html' %}
+{% block title %}Delete {{ tenant.name }} — Platform{% endblock %}
+{% block page_title %}Delete store{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-center align-items-center" style="min-height:60vh">
-  <div class="card border-0 shadow-sm" style="max-width:440px;width:100%">
-    <div class="card-body p-4 text-center">
-      <div class="fs-1 mb-2">⚠️</div>
-      <h5 class="fw-semibold">Delete "{{ tenant.name }}"?</h5>
-      <p class="text-muted small">
-        This permanently deletes the store and <strong>all its data</strong> —
-        users, products, sales, and customers. This cannot be undone.
-      </p>
-      <div class="d-flex gap-2 justify-content-center mt-3">
-        <a href="{% url 'platform_admin:store_detail' tenant.id %}"
-           class="btn btn-secondary">Cancel</a>
-        <form method="post">
-          {% csrf_token %}
-          <button class="btn btn-danger">Yes, delete everything</button>
-        </form>
-      </div>
+<div class="confirm-wrap">
+  <form method="post" class="card confirm-card">
+    {% csrf_token %}
+    <h1>Delete {{ tenant.name }}?</h1>
+    <p class="modal-text">This permanently deletes the store with its users, products and sales history. To keep the data, deactivate the store instead.</p>
+    <p class="danger-note"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> This can't be undone.</p>
+    <div class="form-group">
+      <label class="form-label" for="confirm-name">Type <strong>{{ tenant.name }}</strong> to confirm</label>
+      <input type="text" id="confirm-name" class="form-control" autocomplete="off" autofocus>
     </div>
-  </div>
+    <div class="confirm-actions">
+      <a href="{% url 'platform_admin:store_detail' tenant.id %}" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-danger" id="confirm-go" disabled><i class="bi bi-trash" aria-hidden="true"></i> Delete store</button>
+    </div>
+  </form>
 </div>
+<style>
+.confirm-wrap { display: flex; justify-content: center; padding-top: 6vh; }
+.confirm-card { width: 100%; max-width: 460px; }
+.confirm-card h1 { font-size: 20px; font-weight: 800; margin-bottom: 8px; }
+.danger-note { display: flex; gap: 8px; align-items: center; margin: 12px 0 16px; padding: 10px 12px; border-radius: var(--radius); background: var(--red-tint); color: var(--red-ink-deep); font-size: 13.5px; font-weight: 600; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+</style>
+<script>
+document.getElementById('confirm-name').addEventListener('input', function () {
+  document.getElementById('confirm-go').disabled = this.value.trim() !== '{{ tenant.name|escapejs }}';
+});
+</script>
 {% endblock %}

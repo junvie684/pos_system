@@ -1,80 +1,113 @@
-<!DOCTYPE html>
-<html>
+{% load static %}<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receipt {{ sale.or_display|default:sale.pk }} — {{ tenant.name }}</title>
 <style>
+  @font-face { font-family: 'Source Sans 3'; font-weight: 200 900; font-display: block; src: url('{% static "fonts/source-sans-3-latin.woff2" %}') format('woff2'); }
+  @font-face { font-family: 'Source Sans 3'; font-weight: 200 900; font-display: block; src: url('{% static "fonts/source-sans-3-latin-ext.woff2" %}') format('woff2'); }
+  @font-face { font-family: 'JetBrains Mono'; font-weight: 100 800; font-display: block; src: url('{% static "fonts/jetbrains-mono-latin.woff2" %}') format('woff2'); }
+
   @page { size: 80mm auto; margin: 4mm; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
-    line-height: 1.4;
-    width: 72mm;
-    color: #000;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    width: 72mm; color: #000; background: #fff;
+    font-family: 'Source Sans 3', system-ui, sans-serif; font-size: 13.5px; line-height: 1.35;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  .center { text-align: center; }
-  .divider { border-top: 2px dashed #000; margin: 6px 0; }
-  .row { display: flex; justify-content: space-between; gap: 8px; }
-  .total { font-weight: bold; font-size: 20px; }
-  .change { font-weight: bold; font-size: 15px; }
-  .item-name { font-weight: bold; }
-  .item-sub { padding-left: 8px; color: #000; font-size: 13px; }
-  strong { font-weight: 700; }
-  @media screen { body { max-width: 320px; margin: 20px auto; border: 1px dashed #ccc; padding: 12px; } }
-  @media print {
-    body { width: 100%; }
-  }
+  .fig { font-family: 'JetBrains Mono', 'Source Sans 3', Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .head { text-align: center; padding-bottom: 6px; }
+  .store { font-size: 17px; font-weight: 800; line-height: 1.2; }
+  .head p { font-size: 12.5px; }
+  .head .fig { font-size: 11.5px; }
+  .rule { border-top: 1px dashed #000; margin: 7px 0; }
+  .rule-total { border-top: 2px solid #000; margin: 8px 0 4px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .row .fig { white-space: nowrap; }
+  .meta .row { font-size: 12.5px; }
+  .meta .fig { font-size: 12px; }
+  .serial { font-weight: 700; letter-spacing: .5px; }
+  .item { padding: 3px 0; }
+  .item-name { font-weight: 600; }
+  .item-sub { font-size: 12px; padding-left: 8px; }
+  .item .fig { font-size: 13px; font-weight: 700; }
+  .total { font-size: 15px; font-weight: 800; }
+  .total .fig { font-size: 22px; letter-spacing: -.5px; }
+  .tax .row { font-size: 12px; }
+  .tax .fig { font-size: 12px; }
+  .pay .row { font-size: 13px; }
+  .change { font-weight: 800; }
+  .change .fig { font-size: 15px; }
+  .stamp { margin: 4px 0 8px; padding: 6px; border: 2px solid #000; text-align: center; font-weight: 800; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
+  .stamp small { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+  .thanks { text-align: center; margin-top: 10px; font-size: 13px; }
+  @media screen { body { max-width: 320px; margin: 20px auto; padding: 14px 12px; border: 1px dashed #C3C8D0; } }
+  @media print { body { width: 100%; } }
 </style>
 </head>
-<body>
-  <div class="center"><strong>{{ tenant.name }}</strong></div>
-  <div class="center">{{ tenant.address }}</div>
-  <div class="center">Tel: {{ tenant.phone }}</div>
-  <div class="center">TIN: {{ tenant.tin }}</div>
-  <div class="divider"></div>
-  <div class="row"><span>Date:</span><span>{{ sale.created_at|date:"Y-m-d H:i" }}</span></div>
-  <div class="row"><span>OR #:</span><span>{{ sale.pk }}</span></div>
-  <div class="row"><span>Cashier:</span><span>{{ sale.cashier }}</span></div>
-  {% if sale.customer %}
-  <div class="row"><span>Customer:</span><span>{{ sale.customer.name }}</span></div>
+<body data-receipt-state="{{ sale.status }}">
+<main class="receipt-paper" aria-label="Receipt {{ sale.pk }}">
+  <div class="head">
+    <div class="store">{{ tenant.name }}</div>
+    {% if tenant.address %}<p>{{ tenant.address }}</p>{% endif %}
+    {% if tenant.phone %}<p>Tel <span class="fig">{{ tenant.phone }}</span></p>{% endif %}
+    {% if tenant.tin %}<p>TIN <span class="fig">{{ tenant.tin }}</span></p>{% endif %}
+  </div>
+
+  {% if sale.status == 'refunded' %}
+  <div class="stamp">Refunded<small>{% if sale.refunded_at %}on <span class="fig">{{ sale.refunded_at|date:"Y-m-d H:i" }}</span>{% endif %}{% if sale.refunded_by %} by {{ sale.refunded_by }}{% endif %}</small></div>
+  {% elif sale.status == 'pending' %}
+  <div class="stamp">Held · not paid<small>This is not a receipt</small></div>
   {% endif %}
-  <div class="divider"></div>
+
+  <div class="rule"></div>
+  <div class="meta">
+    {% if sale.or_number %}<div class="row"><span>OR No.</span><span class="fig serial">{{ sale.or_display }}</span></div>{% endif %}
+    <div class="row"><span>Sale ID</span><span class="fig">{{ sale.pk }}</span></div>
+    {% if archived %}<div class="row"><span>Copy</span><span>Reprinted from archive</span></div>{% endif %}
+    <div class="row"><span>Date</span><span class="fig">{{ sale.created_at|date:"Y-m-d H:i" }}</span></div>
+    <div class="row"><span>Cashier</span><span>{{ sale.cashier }}</span></div>
+    {% if sale.customer %}<div class="row"><span>Customer</span><span>{{ sale.customer.name }}</span></div>{% endif %}
+  </div>
+  <div class="rule"></div>
 
   {% for item in sale.items.all %}
-  <div class="row item-name"><span>{{ item.product.name }}</span><span>₱{{ item.subtotal }}</span></div>
-  <div class="item-sub">{{ item.quantity }} x ₱{{ item.unit_price }}</div>
+  <div class="item">
+    <div class="row item-name"><span>{{ item.product.name }}</span><span class="fig">₱{{ item.subtotal|floatformat:"2g" }}</span></div>
+    <div class="item-sub fig">{{ item.quantity }} × ₱{{ item.unit_price|floatformat:"2g" }}</div>
+  </div>
   {% endfor %}
 
-  <div class="divider"></div>
-  <div class="row total"><span>TOTAL</span><span>₱{{ sale.total }}</span></div>
+  <div class="rule-total"></div>
+  <div class="row total"><span>TOTAL</span><span class="fig">₱{{ sale.total|floatformat:"2g" }}</span></div>
 
-  <div class="divider"></div>
-  <div class="row"><span>VATable Sale</span><span>₱{{ vatable_sale|floatformat:2 }}</span></div>
-  <div class="row"><span>VAT (12%)</span><span>₱{{ vat_amount|floatformat:2 }}</span></div>
-  <div class="row"><span>VAT-Exempt Sale</span><span>₱0.00</span></div>
-  <div class="row"><span>Zero-Rated Sale</span><span>₱0.00</span></div>
+  <div class="rule"></div>
+  <div class="tax">
+    <div class="row"><span>VATable sale</span><span class="fig">₱{{ vatable_sale|floatformat:2 }}</span></div>
+    <div class="row"><span>VAT (12%)</span><span class="fig">₱{{ vat_amount|floatformat:2 }}</span></div>
+    <div class="row"><span>VAT-exempt sale</span><span class="fig">₱0.00</span></div>
+    <div class="row"><span>Zero-rated sale</span><span class="fig">₱0.00</span></div>
+  </div>
 
-  {% if sale.cash_tendered %}
-  <div class="divider"></div>
-  <div class="row"><span>Cash Tendered</span><span>₱{{ sale.cash_tendered }}</span></div>
-  <div class="row change"><span>Change</span><span>₱{{ sale.change_given }}</span></div>
-  {% endif %}
+  <div class="rule"></div>
+  <div class="pay">
+    <div class="row"><span>Payment</span><span>{{ sale.get_payment_method_display }}</span></div>
+    {% if sale.reference_number %}<div class="row"><span>Ref #</span><span class="fig">{{ sale.reference_number }}</span></div>{% endif %}
+    {% if sale.cash_tendered %}
+    <div class="row"><span>Cash</span><span class="fig">₱{{ sale.cash_tendered|floatformat:"2g" }}</span></div>
+    <div class="row change"><span>Change</span><span class="fig">₱{{ sale.change_given|floatformat:"2g" }}</span></div>
+    {% endif %}
+  </div>
 
-  <div class="divider"></div>
-  <div class="row"><span>Payment Mode:</span><span>{{ sale.get_payment_method_display }}</span></div>
-  {% if sale.reference_number %}
-  <div class="row"><span>Ref #:</span><span>{{ sale.reference_number }}</span></div>
-  {% endif %}
+  <div class="rule"></div>
+  <p class="thanks">Thank you for your purchase!</p>
+</main>
 
-  <div class="divider"></div>
-  <div class="center" style="margin-top:6px;">{{ sale.status|upper }}</div>
-  <div class="center" style="margin-top: 8px;">Thank you for your purchase!</div>
   <script>
-  if (window.self === window.top) {
-    window.onload = function() { window.print(); };
-  }
-</script>
+    if (window.self === window.top) {
+      window.addEventListener('load', () => (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => window.print()));
+    }
+  </script>
 </body>
 </html>

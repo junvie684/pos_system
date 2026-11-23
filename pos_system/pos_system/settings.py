@@ -62,11 +62,16 @@ if RAILWAY_DOMAIN:
     CSRF_TRUSTED_ORIGINS.append(f'https://{RAILWAY_DOMAIN}')
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += ['https://*.ngrok-free.dev', 'https://*.ngrok-free.app']
-CSRF_USE_SESSIONS    = False  # Keep False to use cookies
-CSRF_COOKIE_HTTPONLY = False  # Must stay False so JS can read the CSRF token
+# The CSRF secret lives in the session, so the POS and the platform console
+# (separate sessions, see pos_system/sessions.py) can't rotate each other's
+# token. Pages read the token from {% csrf_token %} or the csrf-token meta tag.
+CSRF_USE_SESSIONS    = True
 
 # ─── Session ──────────────────────────────────────────────────
-SESSION_COOKIE_NAME             = 'pos_session'  # Isolates POS session from admin platform
+# POS session cookie. The platform console uses its own 'platform_session'
+# cookie under /platform/ (pos_system/sessions.py), so signing in to one app
+# no longer signs the browser out of the other.
+SESSION_COOKIE_NAME             = 'pos_session'
 SESSION_COOKIE_AGE              = 43200          # 12 hours — fits a typical POS shift
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 SESSION_COOKIE_HTTPONLY         = True
@@ -102,6 +107,7 @@ INSTALLED_APPS = [
     'accounts',
     'price_checker',
     'tenants',
+    'archive',
 ]
 
 # ─── Middleware ────────────────────────────────────────────────
@@ -111,7 +117,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
+    'pos_system.sessions.PerAppSessionMiddleware',   # one session per app (POS / platform)
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',  # ← before TenantMiddleware
@@ -167,6 +173,22 @@ else:
     raise ImproperlyConfigured(
         'Set DATABASE_URL for production (or DJANGO_ALLOW_SQLITE=1 to knowingly run on SQLite).'
     )
+
+# Archive database ("pos_archive"): paid sales older than a store's retention
+# period are moved here by `manage.py archive_sales` (see the archive app).
+# ARCHIVE_DATABASE_URL points at it explicitly; otherwise it is a database named
+# pos_archive on the same Postgres server as DATABASE_URL. That database must
+# exist (CREATE DATABASE pos_archive;) and be migrated with
+# `manage.py migrate --database=archive`. Locally it is a SQLite file.
+ARCHIVE_DB_NAME = 'pos_archive'
+if os.environ.get('ARCHIVE_DATABASE_URL'):
+    DATABASES['archive'] = _database_from_url(os.environ['ARCHIVE_DATABASE_URL'])
+elif os.environ.get('DATABASE_URL'):
+    DATABASES['archive'] = {**DATABASES['default'], 'NAME': ARCHIVE_DB_NAME}
+else:
+    DATABASES['archive'] = {'ENGINE': 'django.db.backends.sqlite3',
+                            'NAME': BASE_DIR / f'{ARCHIVE_DB_NAME}.sqlite3'}
+DATABASE_ROUTERS = ['archive.routers.ArchiveRouter']
 
 # ─── Crispy Forms ─────────────────────────────────────────────
 CRISPY_ALLOWED_TEMPLATE_PACKS = 'bootstrap5'

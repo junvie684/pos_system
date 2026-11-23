@@ -1,40 +1,164 @@
 {% extends 'base.html' %}
 {% block title %}Sign in — POS{% endblock %}
+{% block messages %}{% endblock %}
 {% block content %}
-<div class="login-wrap">
-  <div class="login-box">
-    <div class="login-head">
-      <h1>Sign in</h1>
-      <p>Use the account your store manager gave you.</p>
-    </div>
-    <div class="card">
+<main class="signin" data-cashier-screen="sign-in" aria-labelledby="login-title">
+  <div class="signin-slip">
+    <h1 id="login-title">Sign in</h1>
+    <p class="signin-lede">Use the account your store manager gave you.</p>
+
+    {% if messages or form.non_field_errors %}
+    <div class="signin-notes">
+      {% for message in messages %}
+      <div class="alert alert-{{ message.tags }}" role="{% if message.tags == 'error' %}alert{% else %}status{% endif %}">
+        <i class="bi bi-{% if message.tags == 'success' %}check-circle{% elif message.tags == 'error' %}x-circle{% else %}info-circle{% endif %}" aria-hidden="true"></i>
+        <span>{{ message }}</span>
+      </div>
+      {% endfor %}
       {% if form.non_field_errors %}
-      <div class="alert alert-error" style="margin-bottom:16px">
+      <div class="alert alert-error" role="alert">
         <i class="bi bi-x-circle" aria-hidden="true"></i>
-        {{ form.non_field_errors|join:", " }}
+        <span>{{ form.non_field_errors|join:" " }}</span>
       </div>
       {% endif %}
-      <form method="post">
-        {% csrf_token %}
-        {% for field in form %}
-        <div class="form-group">
-          <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
-          <input class="form-control" type="{{ field.field.widget.input_type }}" name="{{ field.html_name }}" id="{{ field.id_for_label }}" {% if field.value %}value="{{ field.value }}"{% endif %} autocomplete="off" {% if forloop.first %}autofocus{% endif %}>
-          {% if field.errors %}<div class="field-err">{{ field.errors|join:", " }}</div>{% endif %}
+    </div>
+    {% endif %}
+
+    <form method="post" class="signin-form" id="signin-form" novalidate>
+      {% csrf_token %}
+      <div class="form-group">
+        <label class="form-label" for="id_username">Username</label>
+        <input class="form-control" type="text" name="username" id="id_username"
+               value="{{ form.username.value|default:'' }}" maxlength="150"
+               autocomplete="username" autocapitalize="none" spellcheck="false" required
+               {% if form.username.errors %}aria-invalid="true" aria-describedby="username-error"{% endif %}
+               {% if not form.username.value %}autofocus{% endif %}>
+        {% if form.username.errors %}<div class="field-err" id="username-error">{{ form.username.errors|join:" " }}</div>{% endif %}
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="id_password">Password</label>
+        <div class="pw-field">
+          <input class="form-control" type="password" name="password" id="id_password"
+                 autocomplete="current-password" required
+                 aria-describedby="caps-note{% if form.password.errors %} password-error{% endif %}"
+                 {% if form.password.errors %}aria-invalid="true"{% endif %}
+                 {% if form.username.value %}autofocus{% endif %}>
+          <button type="button" class="pw-toggle" id="pw-toggle" aria-controls="id_password" aria-pressed="false">Show</button>
         </div>
-        {% endfor %}
-        <button type="submit" class="btn btn-primary login-submit">Sign in</button>
-      </form>
+        <div class="caps-note" id="caps-note" aria-live="polite"></div>
+        {% if form.password.errors %}<div class="field-err" id="password-error">{{ form.password.errors|join:" " }}</div>{% endif %}
+      </div>
+
+      <button type="submit" class="btn btn-primary signin-submit" id="signin-submit">Open register</button>
+    </form>
+
+    <div class="signin-foot">
+      <span>{% now "D j M Y" %}</span>
+      <span>{% now "H:i" %}</span>
     </div>
   </div>
-</div>
+
+  <p class="signin-help">Can't sign in? Your store manager can reset your password or check that your account is linked to the store.</p>
+</main>
+
 <style>
-.login-wrap { min-height: calc(100dvh - 48px); display: flex; align-items: center; justify-content: center; }
-.login-box { width: 100%; max-width: 380px; }
-.login-head { margin-bottom: 20px; }
-.login-head h1 { font-size: 28px; font-weight: 800; letter-spacing: -.3px; }
-.login-head p { color: var(--ink-2); margin-top: 4px; }
+.content:has(> .signin) { padding: 0; }
+.signin {
+  min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 16px 72px;
+  background: var(--paper);
+}
+.signin-slip {
+  width: min(100%, 400px);
+  padding: 32px 32px 0;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.signin-slip h1 { font-size: 28px; font-weight: 800; line-height: 1.15; letter-spacing: -.3px; color: var(--ink); }
+.signin-lede { margin-top: 6px; color: var(--ink-2); font-size: 15px; line-height: 1.45; text-wrap: balance; }
+
+.signin-notes { display: grid; gap: 8px; margin-top: 20px; }
+.signin-notes .alert { margin: 0; }
+
+.signin-form { margin-top: 22px; padding-top: 22px; border-top: 1px dashed var(--rule-strong); }
+.signin-form .form-group { margin-bottom: 16px; }
+.signin-form .form-control { min-height: 46px; font-size: 16px; }
+.signin-form .form-control[aria-invalid="true"] { border-color: var(--red); }
+
+.pw-field { position: relative; }
+.pw-field .form-control { padding-right: 72px; }
+.pw-toggle {
+  position: absolute; top: 4px; right: 4px; bottom: 4px;
+  min-width: 60px; padding: 0 12px;
+  border: 0; border-radius: 4px; background: none;
+  color: var(--ink-2); font: 600 13px/1 var(--font-ui);
+  cursor: pointer; transition: background-color .12s, color .12s;
+}
+.pw-toggle:hover { background: var(--paper-2); color: var(--ink); }
+.pw-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+.caps-note:not(:empty) { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--amber-ink); font-size: 13px; font-weight: 600; }
 .field-err { color: var(--red); font-size: 13px; font-weight: 600; margin-top: 6px; }
-.login-submit { width: 100%; min-height: 48px; font-size: 16px; margin-top: 4px; }
+
+.signin-submit { width: 100%; min-height: 48px; margin-top: 8px; font-size: 16px; }
+.signin-submit[aria-busy="true"] { background: var(--ink-disabled); cursor: progress; }
+
+.signin-foot {
+  display: flex; justify-content: space-between;
+  margin: 28px -32px 0; padding: 12px 32px;
+  border-top: 2px solid var(--ink);
+  font-family: var(--font-fig); font-size: 11.5px; font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.signin-help { width: min(100%, 400px); margin-top: 16px; padding: 0 4px; color: var(--ink-3); font-size: 13px; line-height: 1.45; }
+
+@media (max-width: 480px) {
+  .signin { justify-content: flex-start; padding-top: 32px; }
+  .signin-slip { padding: 24px 20px 0; }
+  .signin-foot { margin-inline: -20px; padding-inline: 20px; }
+}
 </style>
+
+<script>
+(function () {
+  const pw = document.getElementById('id_password');
+  const toggle = document.getElementById('pw-toggle');
+  const caps = document.getElementById('caps-note');
+  const form = document.getElementById('signin-form');
+  const submit = document.getElementById('signin-submit');
+
+  toggle.addEventListener('click', () => {
+    const show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    toggle.textContent = show ? 'Hide' : 'Show';
+    toggle.setAttribute('aria-pressed', String(show));
+    pw.focus();
+  });
+
+  function checkCaps(e) {
+    if (!e.getModifierState) return;
+    caps.textContent = e.getModifierState('CapsLock') ? 'Caps Lock is on.' : '';
+  }
+  pw.addEventListener('keyup', checkCaps);
+  pw.addEventListener('keydown', checkCaps);
+  pw.addEventListener('blur', () => { caps.textContent = ''; });
+
+  // One submit per press: a double tap shouldn't send the form twice.
+  form.addEventListener('submit', (e) => {
+    if (submit.getAttribute('aria-busy') === 'true') { e.preventDefault(); return; }
+    pw.type = 'password';
+    submit.setAttribute('aria-busy', 'true');
+    submit.textContent = 'Signing in…';
+  });
+  // Coming back via the browser's Back button restores the button.
+  window.addEventListener('pageshow', () => {
+    submit.removeAttribute('aria-busy');
+    submit.textContent = 'Open register';
+  });
+})();
+</script>
 {% endblock %}
