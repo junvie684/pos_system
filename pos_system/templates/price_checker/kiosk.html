@@ -274,19 +274,11 @@
         savingsEl.style.display = 'none';
       }
 
-      const stock = parseInt(data.stock) || 0;
+      const STOCK_LABELS = { out: 'Out of Stock', low: 'Only a few left', in: 'In Stock' };
+      const status = STOCK_LABELS[data.stock_status] ? data.stock_status : 'in';
       const stockEl = document.getElementById('p-stock');
-
-      if (stock <= 0) {
-        stockEl.textContent = 'Out of Stock';
-        stockEl.className = 'stock-badge stock-out';
-      } else if (data.low_stock) {
-        stockEl.textContent = 'Low Stock — ' + stock + ' left';
-        stockEl.className = 'stock-badge stock-low';
-      } else {
-        stockEl.textContent = 'In Stock — ' + stock;
-        stockEl.className = 'stock-badge stock-in';
-      }
+      stockEl.textContent = STOCK_LABELS[status];
+      stockEl.className = 'stock-badge stock-' + status;
 
       const promoEl = document.getElementById('p-promo');
       if (data.promo_text) {

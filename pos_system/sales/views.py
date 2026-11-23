@@ -338,7 +338,7 @@ def _settle_payment(sale, status, method, tendered_raw, reference, total):
                 tendered = Decimal(tendered_raw).quantize(CENT)
             except InvalidOperation:
                 raise CheckoutError('Enter a valid cash amount.')
-            if tendered > MAX_AMOUNT:
+            if not tendered.is_finite() or tendered > MAX_AMOUNT:   # "NaN" parses and quantizes
                 raise CheckoutError('Enter a valid cash amount.')
         if tendered < total:
             raise CheckoutError('Cash received is less than the total.')

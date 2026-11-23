@@ -2,21 +2,25 @@
 from django.http import JsonResponse
 from django.shortcuts import render, get_object_or_404
 from django.views.decorators.http import require_GET
-from django.views.decorators.csrf import csrf_exempt
 from products.models import Product
 from tenants.models import Tenant
-import threading
 
-_thread_locals = threading.local()
+# The kiosk is public, so it shows a stock band rather than the exact count.
+LOW_STOCK_AT = 5
+
+
+def stock_status(stock):
+    return 'out' if stock <= 0 else 'low' if stock <= LOW_STOCK_AT else 'in'
+
 
 def kiosk(request, store_slug):
     tenant = get_object_or_404(Tenant, slug=store_slug, is_active=True)
     return render(request, 'price_checker/kiosk.html', {'store': tenant})
 
-@csrf_exempt
+
 @require_GET
 def api_lookup(request, store_slug, barcode):
-    # Identify store from URL instead of JWT
+    # The store comes from the URL: the kiosk is used without signing in.
     tenant = get_object_or_404(Tenant, slug=store_slug, is_active=True)
 
     try:
@@ -33,8 +37,7 @@ def api_lookup(request, store_slug, barcode):
         'found'         : True,
         'name'          : product.name,
         'price'         : str(product.price),
-        'stock'         : product.stock,
-        'low_stock'     : product.stock <= 5,
+        'stock_status'  : stock_status(product.stock),
         'image'         : request.build_absolute_uri(product.image.url) if product.image else None,
         'promo_text'    : None,
     })

@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, unquote, urlparse
 
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
 
 
 def env_bool(name, default=False):
@@ -79,6 +80,8 @@ if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SECURE_SSL_REDIRECT     = env_bool('DJANGO_SECURE_SSL_REDIRECT', default=not TESTING)
     SECURE_HSTS_SECONDS     = int(os.environ.get('DJANGO_HSTS_SECONDS', 60 * 60 * 24 * 30))
+    # Turn on only when every subdomain of the site's domain serves HTTPS.
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('DJANGO_HSTS_INCLUDE_SUBDOMAINS')
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_REFERRER_POLICY      = 'same-origin'
 
@@ -106,6 +109,7 @@ INSTALLED_APPS = [
 # so request.user is populated when tenant resolution runs.
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -213,3 +217,23 @@ LOGOUT_REDIRECT_URL = '/accounts/login/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 X_FRAME_OPTIONS = 'SAMEORIGIN'  # receipt opens in a same-origin modal frame
+
+# Content-Security-Policy (all environments, so problems show up in dev).
+# Everything the pages load is served by this site: fonts and icons are local.
+# Templates still use inline <script>/<style> blocks and onclick handlers, so
+# scripts and styles allow 'unsafe-inline'; moving those to static files would
+# let this drop to 'self' only. The rest blocks plugins, foreign hosts, <base>
+# hijacking, form posts to other sites and framing by other sites.
+SECURE_CSP = {
+    'default-src':     [CSP.SELF],
+    'script-src':      [CSP.SELF, CSP.UNSAFE_INLINE],
+    'style-src':       [CSP.SELF, CSP.UNSAFE_INLINE],
+    'img-src':         [CSP.SELF, 'data:', 'blob:'],
+    'font-src':        [CSP.SELF, 'data:'],
+    'connect-src':     [CSP.SELF],
+    'frame-src':       [CSP.SELF],
+    'frame-ancestors': [CSP.SELF],
+    'object-src':      [CSP.NONE],
+    'base-uri':        [CSP.SELF],
+    'form-action':     [CSP.SELF],
+}

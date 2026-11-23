@@ -108,8 +108,9 @@
     }
     .user-name { font-size: 13px; font-weight: 500; color: var(--text); }
     .user-role { font-size: 11px; color: var(--text3); }
+    .logout-form { margin-left: auto; }
     .logout-btn {
-      margin-left: auto;
+      border: 0; background: transparent; cursor: pointer; padding: 0;
       color: var(--text3);
       text-decoration: none;
       font-size: 15px;
@@ -306,9 +307,12 @@
         <div class="user-name">{{ request.user.username }}</div>
         <div class="user-role">Platform Admin</div>
       </div>
-      <a href="{% url 'platform_admin:logout' %}" class="logout-btn" title="Sign out">
-        <i class="bi bi-box-arrow-right"></i>
-      </a>
+      <form method="post" action="{% url 'platform_admin:logout' %}" class="logout-form">
+        {% csrf_token %}
+        <button type="submit" class="logout-btn" title="Sign out" aria-label="Sign out">
+          <i class="bi bi-box-arrow-right"></i>
+        </button>
+      </form>
     </div>
   </div>
 </aside>

@@ -349,6 +349,9 @@ def platform_login(request):
 
 
 def platform_logout(request):
+    # POST only, like the POS sign-out; a plain visit goes back to the console.
+    if request.method != 'POST':
+        return redirect('platform_admin:dashboard')
     logout(request)
     # logout() already flushes the session, but be explicit
     request.session.flush()

@@ -40,6 +40,10 @@ def login_view(request):
 
 
 def logout_view(request):
+    # POST only (the sidebar posts a form), so a link on another site
+    # can't sign anyone out. A plain visit just goes back to the POS.
+    if request.method != 'POST':
+        return redirect('/')
     request.session.pop('tenant_id', None)
     request.session.pop('app_type', None)    # ← clean up on logout too
     logout(request)

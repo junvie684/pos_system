@@ -129,16 +129,99 @@ class RemovedEndpointTests(TestCase):
         self.assertEqual(self.client.post('/stores/api/login/').status_code, 404)
 
     def test_bearer_token_does_not_pick_a_store(self):
-        import jwt
-        from django.conf import settings
-        from tenants.middleware import TenantMiddleware, get_current_tenant_id
-        from django.test import RequestFactory
         from django.contrib.auth.models import AnonymousUser
+        from django.test import RequestFactory
+        from tenants.middleware import TenantMiddleware, get_current_tenant_id
 
         tenant = make_tenant('store-a')
-        token = jwt.encode({'tenant_id': str(tenant.id)}, settings.SECRET_KEY, algorithm='HS256')
-        request = RequestFactory().get('/', HTTP_AUTHORIZATION=f'Bearer {token}')
+        request = RequestFactory().get('/', HTTP_AUTHORIZATION=f'Bearer {tenant.id}')
         request.session, request.user = {}, AnonymousUser()
         seen = []
         TenantMiddleware(lambda r: seen.append(get_current_tenant_id()))(request)
         self.assertEqual(seen, [None])
+
+
+# ─── Low-priority items from the audit ──────────────────────────
+class PriceCheckerStockTests(TestCase):
+    """The public price checker says in / low / out, never the exact count."""
+
+    def setUp(self):
+        from products.models import Product
+        self.tenant = make_tenant('store-a')
+        self.product = Product.all_objects.create(
+            tenant_id=self.tenant.id, name='Soap', price='50.00', stock=3, barcode='4800001')
+
+    def lookup(self):
+        return self.client.get('/price-check/store-a/api/4800001/').json()
+
+    def test_exact_stock_is_not_disclosed(self):
+        data = self.lookup()
+        self.assertNotIn('stock', data)
+        self.assertEqual(data['stock_status'], 'low')
+
+    def test_stock_status_bands(self):
+        for stock, status in ((0, 'out'), (5, 'low'), (6, 'in'), (500, 'in')):
+            with self.subTest(stock=stock):
+                type(self.product).all_objects.filter(pk=self.product.pk).update(stock=stock)
+                self.assertEqual(self.lookup()['stock_status'], status)
+
+
+class SignOutTests(TestCase):
+    """Signing out takes a POST, so another site can't sign people out with a link."""
+
+    def setUp(self):
+        self.tenant = make_tenant('store-a')
+        self.cashier = make_user(self.tenant, 'cashier1')
+
+    def test_pos_sign_out_ignores_get(self):
+        pos_login(self.client, self.cashier)
+        self.client.get('/accounts/logout/')
+        self.assertIn('_auth_user_id', self.client.session)
+
+    def test_pos_sign_out_by_post(self):
+        pos_login(self.client, self.cashier)
+        self.assertRedirects(self.client.post('/accounts/logout/'), '/accounts/login/',
+                             fetch_redirect_response=False)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    def test_platform_sign_out_ignores_get_and_works_by_post(self):
+        make_platform_admin('platform')
+        self.client.post('/platform/login/', {'username': 'platform', 'password': PASSWORD})
+        self.client.get('/platform/logout/')
+        self.assertEqual(self.client.get('/platform/').status_code, 200)
+        self.client.post('/platform/logout/')
+        self.assertEqual(self.client.get('/platform/').status_code, 302)
+
+    def test_sign_out_menu_posts_a_form(self):
+        pos_login(self.client, self.cashier)
+        html = self.client.get('/new/').content.decode()
+        self.assertRegex(html, r'<form[^>]+method="post"[^>]+action="/accounts/logout/"')
+        self.assertNotIn('href="/accounts/logout/"', html)
+
+
+class CashTenderedTests(TestCase):
+    def setUp(self):
+        from tenants.test_utils import make_product
+        self.tenant = make_tenant('store-a')
+        self.cashier = make_user(self.tenant, 'cashier1')
+        self.product = make_product(self.tenant, price='50.00', stock=10)
+        pos_login(self.client, self.cashier)
+
+    def test_non_numeric_cash_gets_a_clear_message_not_a_logged_error(self):
+        from sales.models import Sale
+        from tenants.test_utils import sale_post
+        for raw in ('NaN', 'nan', 'sNaN', 'Infinity', '-Infinity', '1e999'):
+            with self.subTest(raw=raw), self.assertNoLogs('sales.views', 'ERROR'):
+                resp = self.client.post('/new/', sale_post([(self.product, 1, '50.00')], cash_tendered=raw),
+                                        follow=True)
+                self.assertContains(resp, 'Enter a valid cash amount.')
+                self.assertFalse(Sale.all_objects.exists())
+
+
+class SecurityHeaderTests(TestCase):
+    def test_content_security_policy_is_sent(self):
+        policy = self.client.get('/accounts/login/')['Content-Security-Policy']
+        for directive in ("default-src 'self'", "object-src 'none'", "base-uri 'self'",
+                          "frame-ancestors 'self'", "form-action 'self'"):
+            with self.subTest(directive=directive):
+                self.assertIn(directive, policy)
