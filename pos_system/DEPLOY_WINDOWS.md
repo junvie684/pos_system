@@ -7,10 +7,10 @@ Deploy the `main` branch.
 ## 0. Set your values (re-run this block in each new PowerShell window)
 
 ```powershell
-$HostName = "pos.yourcompany.com"          # site name (DNS must point to this server)
-$DbPass   = "ChangeMeLettersAndNumbers123" # pos_user password: letters/numbers only, 20+ chars
-$py       = "C:\POS\venv\Scripts\python.exe"
 $pgBin    = "C:\Program Files\PostgreSQL\17\bin"
+$py       = "C:\POS\venv\Scripts\python.exe"
+$HostName = "pos.yourcompany.com"
+$DbPass   = "MyStrongPassword2026abcXYZ"
 ```
 
 ## 1. Install software
