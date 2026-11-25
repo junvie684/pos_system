@@ -74,6 +74,17 @@ class ArchivedSale(TenantModel):
         return _name(self.cashier_name)
 
     @property
+    def cashier_display(self):
+        """The cashier's current full name (the copy only holds the username).
+        Falls back to the copied username if the user is gone or has no name.
+        The history view fills `_cashier_display` for a whole page in one query."""
+        if not hasattr(self, '_cashier_display'):
+            from django.contrib.auth.models import User
+            user = User.objects.filter(pk=self.cashier_id).first() if self.cashier_id else None
+            self._cashier_display = (user.get_full_name() if user else '') or self.cashier_name
+        return self._cashier_display
+
+    @property
     def refunded_by(self):
         return _name(self.refunded_by_name)
 

@@ -44,6 +44,13 @@ class Sale(TenantModel):
     def or_display(self):
         return f"OR-{self.or_number:06d}" if self.or_number else ''
 
+    @property
+    def cashier_display(self):
+        """The cashier's full name for screens and receipts; the username if no name is set."""
+        if not self.cashier:
+            return ''
+        return self.cashier.get_full_name() or self.cashier.get_username()
+
     def assign_or_number(self):
         """Give this sale the store's next OR number. Call inside the checkout
         transaction: the store row lock makes terminals take numbers one at a

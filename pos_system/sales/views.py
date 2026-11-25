@@ -17,7 +17,8 @@ import uuid
 from django.utils import timezone
 from django.utils.timesince import timesince
 from django.db.models import Sum, Count
-from django.db.models.functions import TruncDate, Coalesce
+from django.contrib.auth.models import User
+from django.db.models.functions import TruncDate, Coalesce, Concat
 from datetime import timedelta
 
 from tenants.models import Tenant
@@ -711,9 +712,12 @@ def sale_history(request):
     # Search filter
     query = request.GET.get('q', '')
     if query:
-        sales = sales.filter(
+        sales = sales.annotate(
+            cashier_full_name=Concat('cashier__first_name', Value(' '), 'cashier__last_name'),
+        ).filter(
             Q(customer__name__icontains=query) |
             Q(cashier__username__icontains=query) |
+            Q(cashier_full_name__icontains=query) |
             Q(pk__icontains=query) |
             Q(status__icontains=query) |
             _or_number_q(query)
@@ -779,6 +783,14 @@ def sale_history(request):
         archived,
     )
     sales = Paginator(timeline, 25).get_page(request.GET.get('page'))
+
+    # Archived copies only hold the username: look up this page's full names at once.
+    archived_rows = [s for s in sales.object_list if getattr(s, 'is_archived', False)]
+    if archived_rows:
+        names = {u.pk: u.get_full_name() for u in
+                 User.objects.filter(pk__in={s.cashier_id for s in archived_rows if s.cashier_id})}
+        for s in archived_rows:
+            s._cashier_display = names.get(s.cashier_id) or s.cashier_name
 
     return render(request, 'sales/history.html', {
         'sales':          sales,

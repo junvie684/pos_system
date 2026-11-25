@@ -397,6 +397,22 @@ class OrNumberTests(SaleTestBase):
         client_b.post('/new/', sale_post([(product_b, 1, '20.00')], cash_tendered='20.00'))
         self.assertEqual(Sale.all_objects.filter(tenant_id=other.id).get().or_number, 1)
 
+    def test_history_and_receipt_show_cashier_full_name(self):
+        self.cashier.first_name, self.cashier.last_name = 'Maria', 'Santos'
+        self.cashier.save()
+        sale = self.checkout()
+        receipt = self.client.get(f'/receipt/{sale.pk}/')
+        self.assertContains(receipt, 'Maria Santos')
+        self.client.post('/accounts/logout/')
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/history/', {'q': 'maria santos'})
+        self.assertEqual([s.pk for s in resp.context['sales']], [sale.pk])
+        self.assertContains(resp, 'Maria Santos')
+
+    def test_cashier_without_a_name_shows_username(self):
+        sale = self.checkout()
+        self.assertContains(self.client.get(f'/receipt/{sale.pk}/'), 'cashier1')
+
     def test_receipt_and_history_show_or_number(self):
         sale = self.checkout()
         self.assertContains(self.client.get(f'/receipt/{sale.pk}/'), 'OR-000001')

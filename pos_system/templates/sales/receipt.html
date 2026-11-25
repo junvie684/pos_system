@@ -67,7 +67,7 @@
     <div class="row"><span>Sale ID</span><span class="fig">{{ sale.pk }}</span></div>
     {% if archived %}<div class="row"><span>Copy</span><span>Reprinted from archive</span></div>{% endif %}
     <div class="row"><span>Date</span><span class="fig">{{ sale.created_at|date:"Y-m-d H:i" }}</span></div>
-    <div class="row"><span>Cashier</span><span>{{ sale.cashier }}</span></div>
+    <div class="row"><span>Cashier</span><span>{{ sale.cashier_display }}</span></div>
     {% if sale.customer %}<div class="row"><span>Customer</span><span>{{ sale.customer.name }}</span></div>{% endif %}
   </div>
   <div class="rule"></div>

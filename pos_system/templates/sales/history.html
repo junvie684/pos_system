@@ -63,7 +63,7 @@
           <td class="hx-serial fig">{{ sale.or_display|default:"—" }} <span class="hx-id">ID {{ sale.pk }}{% if sale.is_archived %} <span class="hx-archived" title="Moved to the archive database after the store's retention period. Read-only.">Archived</span>{% endif %}</span></td>
           <td class="hx-date fig">{{ sale.created_at|date:"M d, Y" }} <span>{{ sale.created_at|date:"H:i" }}</span></td>
           <td class="hx-who">{{ sale.customer|default:"Walk-in" }}</td>
-          <td class="hx-who">{{ sale.cashier }}</td>
+          <td class="hx-who">{{ sale.cashier_display }}</td>
           <td class="hx-items" title="{% for item in sale.items.all %}{{ item.product.name }} ×{{ item.quantity }}{% if not forloop.last %}, {% endif %}{% endfor %}">
             <span class="hx-count fig">{{ sale.items.all|length }}</span>{% for item in sale.items.all %}{{ item.product.name }} <span class="fig hx-qty">×{{ item.quantity }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}
           </td>
@@ -282,7 +282,7 @@ const salesData = {
   {{ sale.pk }}: {
     orNo: "{{ sale.or_display|default:sale.pk|escapejs }}",
     date: "{{ sale.created_at|date:'M d, Y H:i' }}",
-    cashier: "{{ sale.cashier|escapejs }}",
+    cashier: "{{ sale.cashier_display|escapejs }}",
     total: "{{ sale.total|floatformat:'2g'|escapejs }}",
     items: [
       {% for item in sale.items.all %}
