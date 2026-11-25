@@ -47,7 +47,7 @@ Get-NetFirewallRule | Where-Object DisplayName -like "*Postgre*" | Remove-NetFir
 ## 4. Code + Python packages
 
 ```powershell
-git clone <your-repository-url> C:\POS\repo
+git clone -b security/p0-fixes https://github.com/junvie684/pos_system.git C:\POS\repo
 New-Item -ItemType Junction -Path C:\POS\app -Target C:\POS\repo\pos_system
 python -m venv C:\POS\venv
 & $py -m pip install --upgrade pip
