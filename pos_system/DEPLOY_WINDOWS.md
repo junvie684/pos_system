@@ -51,7 +51,7 @@ git clone <your-repository-url> C:\POS\repo
 New-Item -ItemType Junction -Path C:\POS\app -Target C:\POS\repo\pos_system
 python -m venv C:\POS\venv
 & $py -m pip install --upgrade pip
-& $py -m pip install -r C:\POS\app\requirements.txt waitress
+& $py -m pip install -r C:\POS\app\requirements.txt
 ```
 
 ## 5. `.env` file
