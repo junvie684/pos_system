@@ -1,0 +1,11 @@
+{% comment %}
+Analytics tabs, same look as the Records module (.module-tabs lives in base.html).
+Needs: tabs [(tab, label, icon)], tab. Place it first inside the page's card.
+{% endcomment %}
+<nav class="module-tabs no-print" aria-label="Analytics">
+  {% for key, label, icon in tabs %}
+  <a href="?tab={{ key }}" class="module-tab{% if tab == key %} is-on{% endif %}"{% if tab == key %} aria-current="page"{% endif %}>
+    <i class="bi {{ icon }}" aria-hidden="true"></i>{{ label }}
+  </a>
+  {% endfor %}
+</nav>

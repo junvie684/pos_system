@@ -1,6 +1,9 @@
-import csv
-import logging
 import calendar
+import csv
+import json
+import logging
+import math
+import re
 from datetime import datetime, date, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -8,16 +11,15 @@ from django.contrib.auth.models import User
 from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.db import DatabaseError
-from django.db.models import Sum, F
 from django.http import HttpResponse
 from django.core.paginator import Paginator
 
 from accounts.decorators import feature_required
-from sales.models import Refund, Sale, SaleItem
+from sales.models import Refund, Sale
 
 from .ledger import (
-    archived_completed, archived_refunds_given, archived_refunds_not_in_main, archived_sales_made,
-    archived_total, oldest_archived_year, refund_total_of, refunds_given, refunds_given_by, sales_made, total_of,
+    archived_refunds_given, archived_refunds_not_in_main, archived_sales_made,
+    archived_total, refund_total_of, refunds_given, refunds_given_by, sales_made, total_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,286 +167,317 @@ def monthly_report(request):
     })
 
 
-# ─── Analytics (unified Daily / Weekly / Monthly) ────────────────
+# ─── Analytics: real-time sales performance (see performance.py) ──
+def _fmt(value, kind, signed=False):
+    """A figure as text: 1,234 · ₱1,234.00 · 1.15. signed adds + / − (a real minus)."""
+    if value is None:
+        return '—'
+    sign = ''
+    if signed:
+        sign = '+' if value > 0 else '−' if value < 0 else ''
+        value = abs(value)
+    if kind == 'int':
+        return f'{sign}{value:,}'
+    if kind == 'money':
+        return f'{sign}₱{value:,.2f}'
+    return f'{sign}{value:,.2f}'
+
+
+def _fmt_tick(value, kind, thousands=False):
+    """An axis label. thousands=True writes every tick in k, so one axis
+    never mixes 7,500 with 10k."""
+    if kind == 'ratio':
+        return f'{value:g}'
+    if thousands and value:
+        text = f'{value / 1000:g}k'
+    elif value == int(value):
+        text = f'{value:,.0f}'
+    else:
+        text = f'{value:,.2f}'
+    return f'₱{text}' if kind == 'money' else text
+
+
+def _clock(dt):
+    return f"{dt.hour % 12 or 12}:{dt:%M} {'AM' if dt.hour < 12 else 'PM'}"
+
+
+def _performance(request):
+    from . import performance as P
+
+    period = request.GET.get('period', P.DEFAULT_PERIOD)
+    period = period if period in P.PERIODS else P.DEFAULT_PERIOD
+    metric = request.GET.get('metric', P.DEFAULT_METRIC)
+    metric = metric if metric in P.METRICS else P.DEFAULT_METRIC
+    metric_label, metric_kind = P.METRICS[metric]
+
+    data = P.collect(period, timezone.now())
+    series, step, n, now = data['series'], data['step'], data['n'], data['now']
+    current, prior = series[0], series[1]
+
+    def stop_of(s):
+        """Positions with data: the current period stops at now; a shorter
+        period (Feb against Jan) stops at its own end."""
+        return data['last_bucket'] + 1 if s is current else data['lengths'][s.key]
+
+    # ── What the changes are measured against ──
+    cut = data['cut_at']
+    if not data['is_partial']:
+        compare_note = f'vs. {prior.label.lower()}'
+    elif step == 'hour':
+        compare_note = f'vs. {prior.label.lower()} through {_clock(cut)}'
+    else:
+        compare_note = f'vs. {prior.label.lower()} to the same point ({cut:%b} {cut.day}, {_clock(cut)})'
+
+    # ── Figures ──
+    tiles = []
+    for key, (label, kind) in P.METRICS.items():
+        curr, prev = data['so_far'].value(key), data['prior_so_far'].value(key)
+        pct, diff = P.delta(curr, prev)
+        tiles.append({
+            'key': key, 'label': label, 'value': _fmt(curr, kind),
+            'pct_abs': abs(pct) if pct is not None else None,
+            'diff': _fmt(diff, kind, signed=True) if diff is not None else None,
+            'direction': None if diff is None else 'up' if diff > 0 else 'down' if diff < 0 else 'flat',
+        })
+
+    # ── CSV export: every figure, every series, every position ──
+    if request.GET.get('export') == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = (
+            f'attachment; filename="sales_performance_{period}_{now:%Y-%m-%d}.csv"')
+        writer = csv.writer(response)
+        writer.writerow(['Sales performance', P.PERIODS[period], f'Generated {now:%Y-%m-%d %H:%M}'])
+        writer.writerow(['Changes', compare_note])
+        writer.writerow([])
+        writer.writerow(['Figure', current.label, f'{prior.label} (same point)', 'Change', 'Change %'])
+        for key, (label, kind) in P.METRICS.items():
+            curr, prev = data['so_far'].value(key), data['prior_so_far'].value(key)
+            pct, diff = P.delta(curr, prev)
+            def raw(v, kind=kind):
+                return '' if v is None else v if kind == 'int' else f'{v:.2f}'
+            writer.writerow([label, raw(curr), raw(prev), raw(diff), '' if pct is None else pct])
+        writer.writerow([])
+        writer.writerow(['Position', 'Series', 'Units sold', 'Order items', 'Sales'])
+        for s in series:
+            for i, b in enumerate(s.buckets[:stop_of(s)]):
+                writer.writerow([P.bucket_label(period, step, current, i, short=False), s.label,
+                                 b.units, b.lines, f'{b.revenue:.2f}'])
+        return response
+
+    # ── Series values for the chosen figure; None where there's no data point ──
+    values = {s.key: [b.value(metric) if i < stop_of(s) else None for i, b in enumerate(s.buckets)]
+              for s in series}
+
+    # ── Chart geometry: viewBox 1000 × 300, one polyline per unbroken run ──
+    W, H = 1000, 300
+    peak = max([float(v) for vals in values.values() for v in vals if v is not None] + [0])
+    top, tick_step = P.nice_ceiling(peak)
+
+    def x_of(i):
+        return round(i / (n - 1) * W, 2) if n > 1 else W / 2
+
+    def y_of(v):
+        return round(H - float(v) / top * H, 2)
+
+    chart_series = []
+    for s in series:
+        vals = values[s.key]
+        segments, run = [], []
+        for i, v in enumerate(vals):
+            if v is None:
+                if run:
+                    segments.append(' '.join(run))
+                run = []
+            else:
+                run.append(f'{x_of(i)},{y_of(v)}')
+        if run:
+            segments.append(' '.join(run))
+        last = max((i for i, v in enumerate(vals) if v is not None), default=None)
+        chart_series.append({
+            'key': s.key, 'label': s.label, 'color': P.SERIES_COLORS[s.key], 'segments': segments,
+            # The current line ends in a dot: "you are here".
+            'end': ({'left': round(x_of(last) / W * 100, 2),
+                     'bottom': round(float(vals[last]) / top * 100, 2)}
+                    if s is current and last is not None else None),
+        })
+
+    ticks = [{'label': _fmt_tick(tick_step * k, metric_kind, thousands=top >= 10000),
+              'pct': round(tick_step * k / top * 100, 2)}
+             for k in range(int(round(top / tick_step)) + 1)]
+    every = math.ceil(n / 8)
+    # Up to 24 positions every label fits on a wide screen (minor ones drop
+    # out on narrow ones); past that only every few are drawn at all.
+    x_labels = [{'label': P.bucket_label(period, step, current, i),
+                 'pct': round(x_of(i) / W * 100, 2),
+                 'minor': i % every != 0,
+                 'edge': 'start' if i == 0 else 'end' if i == n - 1 else ''}
+                for i in range(n) if n <= 24 or i % every == 0]
+    long_labels = [P.bucket_label(period, step, current, i, short=False) for i in range(n)]
+    table_rows = [{'label': long_labels[i], 'cells': [_fmt(values[s.key][i], metric_kind) for s in series]}
+                  for i in range(n)]
+    hover = {
+        'labels': long_labels,
+        'series': [{'label': s.label, 'color': P.SERIES_COLORS[s.key],
+                    'values': [None if v is None else _fmt(v, metric_kind) for v in values[s.key]]}
+                   for s in series],
+        'start': data['last_bucket'],
+    }
+    has_data = any(v for vals in values.values() for v in vals if v)
+
+    print_name = re.sub(r'[\\/:*?"<>|]', '', f'Sales performance - {P.PERIODS[period]} - {now:%Y-%m-%d}')
+    return render(request, 'reports/performance.html', {
+        'tabs': ANALYTICS_TABS, 'tab': 'performance',
+        'periods': list(P.PERIODS.items()), 'period': period, 'period_label': P.PERIODS[period],
+        'metric': metric, 'metric_label': metric_label,
+        'tiles': tiles, 'compare_note': compare_note, 'now': now,
+        'chart_series': chart_series, 'ticks': ticks, 'x_labels': x_labels,
+        'table_rows': table_rows, 'hover': hover, 'has_data': has_data,
+        'chart_title': f'{metric_label} by {step}',
+        'archive_unavailable': not data['archive_ok'],
+        # PDF export (partials/dashboard_print.html)
+        'print_section': 'Analytics', 'print_title': 'Sales performance',
+        'print_period': f'{P.PERIODS[period]} · {metric_label} · {compare_note}',
+        'print_landscape': True, 'print_filename_json': json.dumps(print_name),
+    })
+
+
+# ─── Analytics › Trends (see trends.py) ──────────────────────────
+def _line_chart(values, kind, n):
+    """Geometry for one small line chart: points share the bar charts' slots,
+    (i + ½) / n across, so every chart on the tab lines up."""
+    from . import performance as P
+    peak = max([float(v) for v in values if v is not None] + [0])
+    top, step = P.nice_ceiling(peak)
+    def x(i):
+        return (i + 0.5) / n
+    runs, run = [], []
+    for i, v in enumerate(values):
+        if v is None:
+            if run:
+                runs.append(' '.join(run))
+            run = []
+        else:
+            run.append(f'{round(x(i) * 1000, 2)},{round(200 - float(v) / top * 200, 2)}')
+    if run:
+        runs.append(' '.join(run))
+    return {
+        'segments': runs,
+        'dots': [{'left': round(x(i) * 100, 2), 'bottom': round(float(v) / top * 100, 2)}
+                 for i, v in enumerate(values) if v is not None],
+        'ticks': [{'label': _fmt_tick(step * k, kind, thousands=top >= 10000),
+                   'pct': round(step * k / top * 100, 2)}
+                  for k in range(int(round(top / step)) + 1)],
+        'has_data': any(values),
+    }
+
+
+def _trends(request):
+    from . import performance as P
+    from . import trends as T
+
+    def pick(name, default, allowed):
+        value = request.GET.get(name, default)
+        return value if value in allowed else default
+
+    cadence = pick('cadence', T.DEFAULT_CADENCE, T.CADENCES)
+    m1 = pick('metric', 'revenue', P.METRICS)
+    m2 = pick('compare', 'units', P.METRICS)
+    yoy = pick('yoy', 'units', P.METRICS)
+    now = timezone.localtime()
+    data = T.collect(cadence, now)
+    periods, n = data['periods'], len(data['periods'])
+
+    def values(totals, metric):
+        return [t.value(metric) if t is not None else None for t in totals]
+
+    def ly_label(p):
+        if not p.ly_start:
+            return 'No matching week last year'
+        if cadence == 'weekly':
+            return f"Wk {p.ly_start.isocalendar()[1]} · {T._span(p.ly_start, p.ly_end - timedelta(days=1))}"
+        if cadence == 'monthly':
+            return f'{p.ly_start:%B %Y}'
+        return f"Q{(p.ly_start.month - 1) // 3 + 1} {p.ly_start.year}"
+
+    # ── CSV: every figure, every period, with last year beside it ──
+    if request.GET.get('export') == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="sales_trends_{cadence}_{now:%Y-%m-%d}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(['Sales trends', T.CADENCES[cadence], f'Generated {now:%Y-%m-%d %H:%M}'])
+        writer.writerow([])
+        header = ['Period', 'Same period last year']
+        for label, _ in P.METRICS.values():
+            header += [label, f'{label} last year', f'{label} change %']
+        writer.writerow(header)
+        for p, cur, ly in zip(periods, data['current'], data['last_year']):
+            row = [p.long_label, ly_label(p)]
+            for key, (_, kind) in P.METRICS.items():
+                a, b = cur.value(key), (ly.value(key) if ly else None)
+                pct, _ = P.delta(a, b)
+                def raw(v, kind=kind):
+                    return '' if v is None else v if kind == 'int' else f'{v:.2f}'
+                row += [raw(a), raw(b), '' if pct is None else pct]
+            writer.writerow(row)
+        return response
+
+    # ── Two figures over time: two small charts on one time axis ──
+    pair = []
+    for key, color in ((m1, '#0A5FA8'), (m2, '#D2601A')):
+        label, kind = P.METRICS[key]
+        vals = values(data['current'], key)
+        pair.append({'key': key, 'label': label, 'color': color, 'kind': kind,
+                     'chart': _line_chart(vals, kind, n),
+                     'cells': [_fmt(v, kind) for v in vals]})
+
+    # ── Year over year: this period against the same one a year back ──
+    yoy_label, yoy_kind = P.METRICS[yoy]
+    cur_vals, ly_vals = values(data['current'], yoy), values(data['last_year'], yoy)
+    peak = max([float(v) for v in cur_vals + ly_vals if v is not None] + [0])
+    top, step = P.nice_ceiling(peak)
+    groups = []
+    for p, a, b in zip(periods, cur_vals, ly_vals):
+        pct, diff = P.delta(a, b)
+        groups.append({
+            'label': p.label, 'long': p.long_label, 'ly_long': ly_label(p),
+            'cur_pct': round(float(a or 0) / top * 100, 2), 'cur_txt': _fmt(a, yoy_kind),
+            'ly_pct': None if b is None else round(float(b) / top * 100, 2), 'ly_txt': _fmt(b, yoy_kind),
+            'pct_abs': abs(pct) if pct is not None else None,
+            'direction': None if diff is None else 'up' if diff > 0 else 'down' if diff < 0 else 'flat',
+        })
+    yoy_ticks = [{'label': _fmt_tick(step * k, yoy_kind, thousands=top >= 10000),
+                  'pct': round(step * k / top * 100, 2)} for k in range(int(round(top / step)) + 1)]
+
+    hover = {'labels': [p.long_label for p in periods],
+             'series': [{'label': s['label'], 'color': s['color'], 'values': s['cells']} for s in pair]}
+    print_name = re.sub(r'[\\/:*?"<>|]', '', f'Sales trends - {T.CADENCES[cadence]} - {now:%Y-%m-%d}')
+    return render(request, 'reports/trends.html', {
+        'tabs': ANALYTICS_TABS, 'tab': 'trends',
+        'cadences': list(T.CADENCES.items()), 'cadence': cadence,
+        'metrics': [(k, label) for k, (label, _) in P.METRICS.items()],
+        'm1': m1, 'm2': m2, 'yoy': yoy, 'yoy_label': yoy_label,
+        'periods': periods, 'pair': pair, 'groups': groups, 'yoy_ticks': yoy_ticks,
+        'pair_rows': [{'label': p.long_label, 'cells': [s['cells'][i] for s in pair]}
+                      for i, p in enumerate(periods)],
+        'yoy_has_data': any(cur_vals) or any(v for v in ly_vals if v),
+        'hover': hover, 'now': now, 'n': n, 'span_label': f'Last {n} complete {T.PLURAL[cadence]}',
+        'archive_unavailable': not data['archive_ok'],
+        'print_section': 'Analytics', 'print_title': 'Sales trends',
+        'print_period': f'Last {n} {T.PLURAL[cadence]} · {pair[0]["label"]} & {pair[1]["label"]} '
+                        f'· {yoy_label} year over year',
+        'print_landscape': True, 'print_filename_json': json.dumps(print_name),
+    })
+
+
+# (tab, label, Bootstrap icon) — Records-style tabs along the top of the page
+ANALYTICS_TABS = [('performance', 'Performance', 'bi-activity'), ('trends', 'Trends', 'bi-bar-chart-line')]
+
 
 @feature_required('can_access_reports')
 def analytics(request):
-    now = timezone.localtime()
-    today = timezone.localdate()
-    local_tz = timezone.get_current_timezone()
-    mode = request.GET.get('mode', 'daily')
-    modes = [('daily', 'Daily'), ('weekly', 'Weekly'), ('monthly', 'Monthly')]
-
-    # ── Resolve selected period and previous period ───────────────
-    if mode == 'weekly':
-        week_param = request.GET.get('week', '')
-        try:
-            # HTML week input returns e.g. "2026-W20"; Monday = day 1
-            curr_start = datetime.strptime(week_param + '-1', '%G-W%V-%u').date()
-        except (ValueError, TypeError):
-            curr_start = today - timedelta(days=today.weekday())
-        curr_end = curr_start + timedelta(days=6)
-        prev_start = curr_start - timedelta(weeks=1)
-        prev_end = curr_end - timedelta(weeks=1)
-        period_label = f"Week of {curr_start.strftime('%b %d')} – {curr_end.strftime('%b %d, %Y')}"
-        prev_period_label = f"Week of {prev_start.strftime('%b %d')} – {prev_end.strftime('%b %d, %Y')}"
-        selected_week = curr_start.strftime('%G-W%V')
-        selected_date = ''
-        selected_month = now.month
-        selected_year = now.year
-
-    elif mode == 'monthly':
-        try:
-            selected_month = int(request.GET.get('month', now.month))
-            selected_year = int(request.GET.get('year', now.year))
-        except ValueError:
-            selected_month = now.month
-            selected_year = now.year
-        curr_start = date(selected_year, selected_month, 1)
-        curr_end = date(selected_year, selected_month,
-                        calendar.monthrange(selected_year, selected_month)[1])
-        prev_month = selected_month - 1 or 12
-        prev_year = selected_year if selected_month > 1 else selected_year - 1
-        prev_start = date(prev_year, prev_month, 1)
-        prev_end = date(prev_year, prev_month,
-                        calendar.monthrange(prev_year, prev_month)[1])
-        period_label = curr_start.strftime('%B %Y')
-        prev_period_label = prev_start.strftime('%B %Y')
-        selected_week = ''
-        selected_date = ''
-
-    else:  # daily
-        mode = 'daily'
-        day_param = request.GET.get('day', '')
-        try:
-            curr_start = datetime.strptime(day_param, '%Y-%m-%d').date()
-        except (ValueError, TypeError):
-            curr_start = today
-        curr_end = curr_start
-        prev_start = curr_start - timedelta(days=1)
-        prev_end = curr_start - timedelta(days=1)
-        period_label = curr_start.strftime('%B %d, %Y')
-        prev_period_label = prev_start.strftime('%B %d, %Y')
-        selected_date = curr_start.strftime('%Y-%m-%d')
-        selected_week = ''
-        selected_month = now.month
-        selected_year = now.year
-
-    # ── Querysets ─────────────────────────────────────────────────
-    curr_qs = Sale.objects.filter(
-        status='completed',
-        created_at__date__gte=curr_start,
-        created_at__date__lte=curr_end,
-    ).select_related('customer', 'cashier').prefetch_related('items', 'refunds__items').order_by('-created_at')
-
-    prev_qs = Sale.objects.filter(
-        status='completed',
-        created_at__date__gte=prev_start,
-        created_at__date__lte=prev_end,
-    ).prefetch_related('items', 'refunds__items')
-
-    # ── Stats ─────────────────────────────────────────────────────
-    # Sales past the retention period live in the archive database; they are
-    # read separately and counted with the rest.
-    curr_sales_list = list(curr_qs)
-    prev_sales_list = list(prev_qs)
-    archive_unavailable = False
-    oldest_year = None
-    try:
-        curr_sales_list += archived_completed(curr_start, curr_end, curr_qs)
-        prev_sales_list += archived_completed(prev_start, prev_end, prev_qs)
-        curr_sales_list.sort(key=lambda s: s.created_at, reverse=True)
-        oldest_year = oldest_archived_year()
-    except DatabaseError:
-        logger.exception('Archive database unavailable for analytics')
-        archive_unavailable = True
-
-    # Completed sales, less anything handed back on the ones partly refunded.
-    curr_revenue = sum(s.kept_total for s in curr_sales_list)
-    prev_revenue = sum(s.kept_total for s in prev_sales_list)
-    curr_count = len(curr_sales_list)
-    prev_count = len(prev_sales_list)
-    curr_avg = (curr_revenue / curr_count) if curr_count else 0
-    prev_avg = (prev_revenue / prev_count) if prev_count else 0
-
-    def pct_delta(curr, prev):
-        if not prev:
-            return None
-        return round(((float(curr) - float(prev)) / float(prev)) * 100, 1)
-
-    curr_items = sum(i.quantity for s in curr_sales_list for i in s.items.all())
-    prev_items = sum(i.quantity for s in prev_sales_list for i in s.items.all())
-    items_delta = pct_delta(curr_items, prev_items)
-    revenue_delta = pct_delta(curr_revenue, prev_revenue)
-    count_delta = pct_delta(curr_count, prev_count)
-    avg_delta = pct_delta(curr_avg, prev_avg)
-
-    # ── Chart data ────────────────────────────────────────────────
-    # Bucketed from the sale lists above, so archived sales are included.
-    def revenue_by(sales, key):
-        buckets = {}
-        for sale in sales:
-            k = key(timezone.localtime(sale.created_at))
-            buckets[k] = buckets.get(k, 0) + float(sale.kept_total)
-        return buckets
-
-    if mode == 'daily':
-        # Hourly buckets 00:00 – 23:00
-        chart_labels = [f'{h:02d}:00' for h in range(24)]
-        by_hour_curr = revenue_by(curr_sales_list, lambda t: t.hour)
-        by_hour_prev = revenue_by(prev_sales_list, lambda t: t.hour)
-        chart_curr = [by_hour_curr.get(h, 0) for h in range(24)]
-        chart_prev = [by_hour_prev.get(h, 0) for h in range(24)]
-
-    elif mode == 'weekly':
-        # One bar per day of the week
-        days_curr = [curr_start + timedelta(days=i) for i in range(7)]
-        days_prev = [prev_start + timedelta(days=i) for i in range(7)]
-        chart_labels = [d.strftime('%a %d') for d in days_curr]
-        by_day_curr = revenue_by(curr_sales_list, lambda t: t.date())
-        by_day_prev = revenue_by(prev_sales_list, lambda t: t.date())
-        chart_curr = [by_day_curr.get(d, 0) for d in days_curr]
-        chart_prev = [by_day_prev.get(d, 0) for d in days_prev]
-
-    else:  # monthly
-        days_curr = calendar.monthrange(curr_start.year, curr_start.month)[1]
-        days_prev = calendar.monthrange(prev_start.year, prev_start.month)[1]
-        max_days = max(days_curr, days_prev)
-        chart_labels = [str(d) for d in range(1, max_days + 1)]
-        by_day_curr = revenue_by(curr_sales_list, lambda t: t.day)
-        by_day_prev = revenue_by(prev_sales_list, lambda t: t.day)
-        # Pad the shorter month with None so it shows a gap
-        chart_curr = [by_day_curr.get(d, 0) for d in range(1, days_curr + 1)] + [None] * (max_days - days_curr)
-        chart_prev = [by_day_prev.get(d, 0) for d in range(1, days_prev + 1)] + [None] * (max_days - days_prev)
-
-    # ── Chart rows for the server-rendered column chart ──────────
-    peak = max([v or 0 for v in chart_curr] + [v or 0 for v in chart_prev] + [0]) or 1
-    chart_rows = []
-    for i, (label, curr_v, prev_v) in enumerate(zip(chart_labels, chart_curr, chart_prev)):
-        if mode == 'daily':
-            show_label = i % 3 == 0
-        elif mode == 'monthly':
-            show_label = i == 0 or (i + 1) % 5 == 0
-        else:
-            show_label = True
-        chart_rows.append({
-            'label': label,
-            'show_label': show_label,
-            'curr': curr_v,
-            'prev': prev_v,
-            'curr_pct': round((curr_v or 0) / peak * 100, 1),
-            'prev_pct': round((prev_v or 0) / peak * 100, 1),
-        })
-    chart_has_data = any(v for v in chart_curr if v) or any(v for v in chart_prev if v)
-
-    # ── CSV Export ────────────────────────────────────────────────
-    if request.GET.get('export') == 'csv':
-        filename = f"analytics_{mode}_{curr_start}.csv"
-        response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        writer = csv.writer(response)
-        writer.writerow(['#', 'Customer', 'Cashier', 'Total', 'Date/Time'])
-        for sale in curr_sales_list:
-            writer.writerow([
-                sale.pk,
-                str(sale.customer) if sale.customer else 'Walk-in',
-                str(sale.cashier),
-                sale.kept_total,
-                timezone.localtime(sale.created_at).strftime('%Y-%m-%d %H:%M'),
-            ])
-        writer.writerow([])
-        writer.writerow(['', '', 'TOTAL', curr_revenue, ''])
-        return response
-
-    # ── Top products and payment mix for the period ───────────────
-    totals_by_product = {}
-    for row in (SaleItem.objects
-                .filter(sale__status='completed', sale__created_at__date__gte=curr_start,
-                        sale__created_at__date__lte=curr_end)
-                .values('product__name')
-                .annotate(qty=Sum('quantity'), rev=Sum(F('quantity') * F('unit_price')))):
-        totals_by_product[row['product__name']] = {'qty': row['qty'], 'rev': row['rev']}
-    for sale in curr_sales_list:
-        if getattr(sale, 'is_archived', False):
-            for item in sale.items.all():
-                row = totals_by_product.setdefault(item.product_name, {'qty': 0, 'rev': 0})
-                row['qty'] += item.quantity
-                row['rev'] += item.subtotal
-    top_products = sorted(
-        ({'product__name': name, **vals} for name, vals in totals_by_product.items()),
-        key=lambda p: -p['rev'],
-    )[:5]
-    top_peak = max([float(p['rev'] or 0) for p in top_products] + [0]) or 1
-    for p in top_products:
-        p['pct'] = round(float(p['rev'] or 0) / top_peak * 100, 1)
-
-    method_names = dict(Sale.PAYMENT_METHODS)
-    mix = {}
-    for sale in curr_sales_list:
-        row = mix.setdefault(sale.payment_method, {'label': method_names.get(sale.payment_method, sale.payment_method), 'count': 0, 'amount': 0})
-        row['count'] += 1
-        row['amount'] += sale.kept_total
-    payment_mix = sorted(mix.values(), key=lambda r: -r['amount'])
-    for row in payment_mix:
-        row['pct'] = round(float(row['amount']) / float(curr_revenue) * 100, 1) if curr_revenue else 0
-
-    # ── Step to the previous / next period ────────────────────────
-    if mode == 'daily':
-        step_prev = f"mode=daily&day={prev_start:%Y-%m-%d}"
-        step_next = f"mode=daily&day={curr_start + timedelta(days=1):%Y-%m-%d}"
-        is_current = curr_start >= today
-    elif mode == 'weekly':
-        step_prev = f"mode=weekly&week={prev_start:%G-W%V}"
-        step_next = f"mode=weekly&week={curr_start + timedelta(weeks=1):%G-W%V}"
-        is_current = curr_end >= today
-    else:
-        nxt = curr_end + timedelta(days=1)
-        step_prev = f"mode=monthly&month={prev_start.month}&year={prev_start.year}"
-        step_next = f"mode=monthly&month={nxt.month}&year={nxt.year}"
-        is_current = curr_end >= today
-
-    # ── Month/year dropdowns (for monthly filter UI) ──────────────
-    months = [{'value': i, 'label': datetime(2000, i, 1).strftime('%B')} for i in range(1, 13)]
-    years = list(range(min(now.year - 3, oldest_year or now.year), now.year + 1))
-
-    return render(request, 'reports/analytics.html', {
-        'archive_unavailable': archive_unavailable,
-        'mode': mode,
-        'modes': modes,
-        'period_label': period_label,
-        'prev_period_label': prev_period_label,
-
-        # Stats
-        'curr_revenue': curr_revenue,
-        'prev_revenue': prev_revenue,
-        'revenue_delta': revenue_delta,
-        'curr_count': curr_count,
-        'prev_count': prev_count,
-        'count_delta': count_delta,
-        'curr_avg': round(curr_avg, 2),
-        'prev_avg': round(prev_avg, 2),
-        'avg_delta': avg_delta,
-        'curr_items': curr_items,
-        'prev_items': prev_items,
-        'items_delta': items_delta,
-        'top_products': top_products,
-        'payment_mix': payment_mix,
-        'step_prev': step_prev,
-        'step_next': step_next,
-        'is_current': is_current,
-
-        # Chart (server-rendered; no chart library)
-        'chart_rows': chart_rows,
-        'chart_has_data': chart_has_data,
-
-        # Filter state
-        'selected_date': selected_date,
-        'selected_week': selected_week,
-        'selected_month': selected_month,
-        'selected_year': selected_year,
-        'months': months,
-        'years': years,
-    })
+    if request.GET.get('tab') == 'trends':
+        return _trends(request)
+    return _performance(request)
 
 
 # ─── Cash Closing Report (Shift Report) ──────────────────────────

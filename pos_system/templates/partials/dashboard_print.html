@@ -1,7 +1,7 @@
 {% comment %}
 PDF export for the Dashboard tabs: the browser's print dialog ("Save as PDF")
 with a print layout. Needs: print_title, print_period, print_filename_json.
-Optional: print_landscape.
+Optional: print_landscape, print_section (default "Dashboard").
 {% endcomment %}
 <header class="print-head" aria-hidden="true">
   <div>
@@ -9,7 +9,7 @@ Optional: print_landscape.
     {% if current_tenant.tin %}<span>TIN {{ current_tenant.tin }}</span>{% endif %}
   </div>
   <div class="print-title">
-    <b>Dashboard · {{ print_title }}</b>
+    <b>{{ print_section|default:'Dashboard' }} · {{ print_title }}</b>
     <span>{{ print_period }}</span>
   </div>
   <div class="print-meta">

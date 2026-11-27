@@ -271,6 +271,18 @@
     .content { padding: 24px 28px; }
 
     /* ── Cards ─────────────────────────────────────────── */
+    /* ── Module tabs: underlined tabs along the top of a card (Records, Analytics) ── */
+    .module-tabs { display: flex; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--rule); background: var(--paper); overflow-x: auto; scrollbar-width: none; }
+    .module-tabs::-webkit-scrollbar { display: none; }
+    .module-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; margin-bottom: -1px; border-bottom: 3px solid transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; text-decoration: none; white-space: nowrap; transition: color .12s, border-color .12s, background-color .12s; }
+    .module-tab i { font-size: 16px; color: var(--ink-3); }
+    .module-tab:hover { color: var(--ink); background: var(--paper-2); }
+    .module-tab.is-on { color: var(--ink); font-weight: 700; border-bottom-color: var(--ink); }
+    .module-tab.is-on i { color: var(--ink); }
+    @media (max-width: 760px) {
+      .module-tab { flex: 1 0 auto; justify-content: center; padding: 0 12px; }
+    }
+
     .card {
       background: var(--panel);
       border: 1px solid var(--rule);

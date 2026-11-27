@@ -88,22 +88,3 @@ def archived_refunds_not_in_main(arch_refunds, main_refunds):
 
 def archived_total(qs):
     return qs.aggregate(t=Coalesce(Sum('total'), Value(ZERO)))['t']
-
-
-def archived_completed(start, end, main_qs):
-    """Completed archived sales between two local dates, with their lines,
-    skipping any that are also in `main_qs` (a run that stopped mid-move)."""
-    from archive.models import ArchivedSale
-    qs = ArchivedSale.objects.filter(
-        status='completed', created_at__date__gte=start, created_at__date__lte=end,
-    ).prefetch_related('items', 'refunds')
-    if not qs.exists():
-        return []
-    in_main = set(main_qs.values_list('pk', flat=True))
-    return [sale for sale in qs if sale.pk not in in_main]
-
-
-def oldest_archived_year():
-    from archive.models import ArchivedSale
-    first = ArchivedSale.objects.order_by('created_at').values_list('created_at', flat=True).first()
-    return first.year if first else None

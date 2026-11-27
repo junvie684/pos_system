@@ -353,7 +353,7 @@ class ArchiveHourTests(TestCase):
 
 
 class AnalyticsArchiveTests(TestCase):
-    """Analytics reads archived sales for old periods."""
+    """Analytics compares with the same day last year, which may be archived."""
     databases = BOTH_DBS
 
     def setUp(self):
@@ -361,31 +361,20 @@ class AnalyticsArchiveTests(TestCase):
         self.manager = make_user(self.store, 'mgr', role='manager', can_access_reports=True)
         pandesal = make_product(self.store, name='Pandesal', price='45.00')
         sale = make_sale(self.store, self.manager, pandesal, qty=2)
-        Sale.all_objects.filter(pk=sale.pk).update(payment_method='gcash')
-        age(sale, 400)
-        self.day = timezone.localdate(timezone.now() - timedelta(days=400))
+        self.when = timezone.localtime(timezone.now())
+        last_year = self.when.replace(year=self.when.year - 1) if not (self.when.month == 2 and self.when.day == 29)             else self.when.replace(year=self.when.year - 1, day=28)
+        Sale.all_objects.filter(pk=sale.pk).update(created_at=last_year)
         archive_store(self.store)
-        pos_login(self.client, self.manager)
 
-    def ctx(self, **params):
-        return self.client.get('/reports/analytics/', params).context
-
-    def test_daily_figures_include_the_archived_sale(self):
-        ctx = self.ctx(mode='daily', day=self.day.isoformat())
-        self.assertEqual((ctx['curr_count'], ctx['curr_items'], ctx['curr_revenue']), (1, 2, Decimal('90.00')))
-        self.assertEqual([p['product__name'] for p in ctx['top_products']], ['Pandesal'])
-        self.assertEqual(ctx['payment_mix'][0]['label'], 'GCash')
-        self.assertEqual(sum(r['curr'] or 0 for r in ctx['chart_rows']), 90.0)
-        self.assertFalse(ctx['archive_unavailable'])
-
-    def test_monthly_view_and_year_list_reach_archived_periods(self):
-        ctx = self.ctx(mode='monthly', month=self.day.month, year=self.day.year)
-        self.assertEqual(ctx['curr_revenue'], Decimal('90.00'))
-        self.assertIn(self.day.year, ctx['years'])
-
-    def test_next_day_compares_against_the_archived_day(self):
-        ctx = self.ctx(mode='daily', day=(self.day + timedelta(days=1)).isoformat())
-        self.assertEqual(ctx['prev_revenue'], Decimal('90.00'))
+    def test_same_day_last_year_includes_the_archived_sale(self):
+        from reports.performance import collect
+        self.assertEqual(ArchivedSale.all_objects.count(), 1)
+        with tenant_context(self.store.id):
+            data = collect('today', self.when)
+        last_year = next(s for s in data['series'] if s.key == 'last_year')
+        self.assertEqual(sum(b.units for b in last_year.buckets), 2)
+        self.assertEqual(sum(b.revenue for b in last_year.buckets), Decimal('90.00'))
+        self.assertTrue(data['archive_ok'])
 
 
 class DashboardArchiveTests(TestCase):

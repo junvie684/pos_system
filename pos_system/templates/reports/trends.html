@@ -1,0 +1,288 @@
+{% extends 'base.html' %}
+{% block title %}Analytics — SafePOS{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+{% block topbar_actions %}
+<a href="?tab=trends&cadence={{ cadence }}&metric={{ m1 }}&compare={{ m2 }}&yoy={{ yoy }}&export=csv" class="btn btn-ghost"><i class="bi bi-filetype-csv" aria-hidden="true"></i> <span class="btn-text">Export CSV</span></a>
+<button type="button" class="btn btn-ghost" onclick="exportPdf()"><i class="bi bi-filetype-pdf" aria-hidden="true"></i> <span class="btn-text">Export PDF</span></button>
+{% endblock %}
+{% block content %}
+{% include 'partials/dashboard_print.html' %}
+
+{% if archive_unavailable %}
+<div class="alert alert-warning tr-note" role="status">
+  <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+  <span>The archive database isn't reachable, so sales older than the retention period are missing from these figures.</span>
+</div>
+{% endif %}
+
+{# One form: every picker on the page submits the others' choices with it. #}
+<form method="get" aria-label="Choose what to show">
+<input type="hidden" name="tab" value="trends">
+
+<div class="card tr-box">
+  {% include 'reports/_analytics_tabs.html' %}
+  <div class="an-toolbar">
+    <label class="pf-field no-print">
+      <span>Cadence</span>
+      <select name="cadence" class="form-control" onchange="this.form.submit()">
+        {% for key, label in cadences %}<option value="{{ key }}" {% if key == cadence %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button type="submit" class="btn btn-primary btn-sm">Show</button></noscript>
+    <p class="tr-meta"><b>{{ span_label }}</b> · Data last updated {{ now|date:"M j, Y" }} at {{ now|date:"g:i A" }}</p>
+  </div>
+</div>
+
+<div class="tr-grid">
+  <!-- ── Two figures over time: two charts on one time axis ── -->
+  <section class="card tr-card" aria-labelledby="tr-pair-h">
+    <header class="tr-head">
+      <h2 id="tr-pair-h">Sold units &amp; sales</h2>
+      <p class="tr-hint">Two figures over the same periods, one chart each</p>
+    </header>
+    <div class="tr-controls no-print">
+      <label class="pf-field"><span>Metric</span>
+        <select name="metric" class="form-control" onchange="this.form.submit()">{% for key, label in metrics %}<option value="{{ key }}" {% if key == m1 %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      </label>
+      <label class="pf-field"><span>Compared with</span>
+        <select name="compare" class="form-control" onchange="this.form.submit()">{% for key, label in metrics %}<option value="{{ key }}" {% if key == m2 %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      </label>
+    </div>
+
+    <div class="tr-pair" style="--n: {{ n }}">
+      {% for s in pair %}
+      <figure class="tr-mini">
+        <figcaption><i class="tr-key" style="background: {{ s.color }}" aria-hidden="true"></i>{{ s.label }}</figcaption>
+        <div class="tr-frame">
+          <div class="tr-y" aria-hidden="true">{% for t in s.chart.ticks %}<span style="bottom: {{ t.pct }}%">{{ t.label }}</span>{% endfor %}</div>
+          <div class="tr-plot" tabindex="0" data-pair-plot
+               aria-label="{{ s.label }} by period. Use the left and right arrow keys to read each period, or open the table below.">
+            {% for t in s.chart.ticks %}<span class="tr-grid-line" style="bottom: {{ t.pct }}%" aria-hidden="true"></span>{% endfor %}
+            <svg class="tr-svg" viewBox="0 0 1000 200" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+              {% for seg in s.chart.segments %}<polyline points="{{ seg }}" stroke="{{ s.color }}" class="tr-line"/>{% endfor %}
+            </svg>
+            {% for d in s.chart.dots %}<span class="tr-dot" style="left: {{ d.left }}%; bottom: {{ d.bottom }}%; background: {{ s.color }}" aria-hidden="true"></span>{% endfor %}
+            <span class="tr-cross" hidden aria-hidden="true"></span>
+            <div class="tr-tip" hidden role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </figure>
+      {% endfor %}
+      <div class="tr-x" aria-hidden="true">{% for p in periods %}<span>{{ p.label }}</span>{% endfor %}</div>
+    </div>
+
+    <details class="tr-table no-print">
+      <summary>Show as table</summary>
+      <div class="tr-table-wrap"><table>
+        <thead><tr><th scope="col">Period</th>{% for s in pair %}<th scope="col">{{ s.label }}</th>{% endfor %}</tr></thead>
+        <tbody>{% for row in pair_rows %}<tr><th scope="row">{{ row.label }}</th>{% for c in row.cells %}<td class="fig">{{ c }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+      </table></div>
+    </details>
+  </section>
+
+  <!-- ── Year over year ── -->
+  <section class="card tr-card" aria-labelledby="tr-yoy-h">
+    <header class="tr-head">
+      <h2 id="tr-yoy-h">Business trends year over year</h2>
+      <p class="tr-hint">Each period against the same one a year earlier</p>
+    </header>
+    <div class="tr-controls">
+      <label class="pf-field no-print"><span>Metric</span>
+        <select name="yoy" class="form-control" onchange="this.form.submit()">{% for key, label in metrics %}<option value="{{ key }}" {% if key == yoy %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      </label>
+      <ul class="tr-legend" aria-label="Legend">
+        <li><i class="is-cur" aria-hidden="true"></i>Current period</li>
+        <li><i class="is-ly" aria-hidden="true"></i>Same period last year</li>
+      </ul>
+    </div>
+
+    {% if yoy_has_data %}
+    <div class="tr-yoy" style="--n: {{ n }}">
+      <div class="tr-frame is-bars">
+        <div class="tr-y" aria-hidden="true">{% for t in yoy_ticks %}<span style="bottom: {{ t.pct }}%">{{ t.label }}</span>{% endfor %}</div>
+        <div class="tr-plot is-bars" role="list" aria-label="{{ yoy_label }}, each period against the same one last year">
+          {% for t in yoy_ticks %}<span class="tr-grid-line" style="bottom: {{ t.pct }}%" aria-hidden="true"></span>{% endfor %}
+          {% for g in groups %}
+          <div class="tr-group" role="listitem" tabindex="0"
+               aria-label="{{ g.long }}: {{ g.cur_txt }}. {{ g.ly_long }}: {{ g.ly_txt }}.">
+            <span class="tr-bar is-cur{% if not g.cur_pct %} is-zero{% endif %}" style="height: {{ g.cur_pct }}%"></span>
+            {% if g.ly_pct is not None %}<span class="tr-bar is-ly{% if not g.ly_pct %} is-zero{% endif %}" style="height: {{ g.ly_pct }}%"></span>{% else %}<span class="tr-bar is-none"></span>{% endif %}
+            <span class="tr-gtip" aria-hidden="true">
+              <b>{{ g.long }}</b>
+              <span class="row"><i class="is-cur"></i><strong class="fig">{{ g.cur_txt }}</strong><span>This period</span></span>
+              <span class="row"><i class="is-ly"></i><strong class="fig">{{ g.ly_txt }}</strong><span>{{ g.ly_long }}</span></span>
+              <span class="chg">{% if g.direction == 'up' %}<span class="up">↑ <span class="fig">{% if g.pct_abs is not None %}{{ g.pct_abs }}%{% else %}new{% endif %}</span></span> vs last year{% elif g.direction == 'down' %}<span class="down">↓ <span class="fig">{{ g.pct_abs }}%</span></span> vs last year{% elif g.direction == 'flat' %}Same as last year{% else %}Nothing to compare{% endif %}</span>
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="tr-x" aria-hidden="true">{% for g in groups %}<span>{{ g.label }}</span>{% endfor %}</div>
+    </div>
+    {% else %}
+    <p class="tr-empty">No sales in these periods or the same ones last year.</p>
+    {% endif %}
+
+    <details class="tr-table no-print">
+      <summary>Show as table</summary>
+      <div class="tr-table-wrap"><table>
+        <thead><tr><th scope="col">Period</th><th scope="col">{{ yoy_label }}</th><th scope="col">Last year</th><th scope="col">Change</th></tr></thead>
+        <tbody>{% for g in groups %}<tr><th scope="row">{{ g.long }}</th><td class="fig">{{ g.cur_txt }}</td><td class="fig">{{ g.ly_txt }}</td><td class="fig">{% if g.pct_abs is not None %}{% if g.direction == 'down' %}−{% elif g.direction == 'up' %}+{% endif %}{{ g.pct_abs }}%{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </details>
+  </section>
+</div>
+</form>
+
+{{ hover|json_script:"tr-data" }}
+
+<style>
+.tr-note { margin-bottom: 14px; }
+.tr-box { padding: 0; margin-bottom: 12px; }
+.an-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; }
+.pf-field { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.pf-field .form-control { min-height: 36px; height: 36px; padding: 0 10px; font-size: 14px; width: auto; }
+.tr-meta { margin-left: auto; font-size: 12.5px; color: var(--ink-3); }
+.tr-meta b { color: var(--ink); }
+
+.tr-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.tr-card { padding: 16px 16px 12px; }
+.tr-head h2 { font-size: 15px; font-weight: 700; color: var(--ink); }
+.tr-hint { margin-top: 2px; font-size: 12.5px; color: var(--ink-3); }
+.tr-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 12px 0 14px; }
+
+/* ── Shared frame: fixed y-axis column so stacked charts line up ── */
+.tr-frame { display: grid; grid-template-columns: 58px minmax(0, 1fr); column-gap: 8px; height: 130px; }
+.tr-frame.is-bars { height: 250px; }
+.tr-y { position: relative; }
+.tr-y span { position: absolute; right: 0; transform: translateY(50%); font-family: var(--font-fig); font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.tr-plot { position: relative; outline-offset: 4px; }
+.tr-grid-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--rule); }
+.tr-grid-line:first-child { background: var(--rule-strong); }
+.tr-x { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); margin-left: 66px; padding-top: 8px; }
+.tr-x span { text-align: center; font-family: var(--font-fig); font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; }
+
+/* ── Small line charts ── */
+.tr-pair { display: flex; flex-direction: column; gap: 14px; }
+.tr-mini { margin: 0; }
+.tr-mini figcaption { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--ink); }
+.tr-key { width: 16px; height: 2px; border-radius: 1px; display: inline-block; }
+.tr-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tr-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.tr-dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, 50%); box-shadow: 0 0 0 2px var(--panel); pointer-events: none; }
+.tr-plot[data-pair-plot] { cursor: crosshair; touch-action: pan-y; }
+.tr-cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-3); pointer-events: none; }
+.tr-tip, .tr-gtip { position: absolute; z-index: 3; min-width: 180px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--rule-strong); border-radius: var(--radius); box-shadow: 0 8px 20px -8px rgba(6,47,110,.3); font-size: 12.5px; pointer-events: none; }
+.tr-tip { top: 0; }
+.tr-tip b, .tr-gtip b { display: block; margin-bottom: 4px; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.tr-tip div, .tr-gtip .row { display: grid; grid-template-columns: 14px auto 1fr; align-items: center; gap: 6px; padding: 1px 0; white-space: nowrap; }
+.tr-tip i, .tr-gtip i { height: 2px; border-radius: 1px; }
+.tr-tip strong, .tr-gtip strong { color: var(--ink); }
+.tr-tip span, .tr-gtip .row span { color: var(--ink-3); }
+
+/* ── Paired bars ── */
+.tr-plot.is-bars { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); }
+.tr-group { position: relative; display: flex; align-items: flex-end; justify-content: center; gap: 2px; height: 100%; padding: 0 4px; outline-offset: -2px; cursor: default; }
+.tr-bar { flex: 0 1 24px; border-radius: 4px 4px 0 0; transition: filter .12s; }
+.tr-bar.is-cur, .tr-legend i.is-cur, .tr-gtip i.is-cur { background: #0A5FA8; }
+.tr-bar.is-ly, .tr-legend i.is-ly, .tr-gtip i.is-ly { background: #2A9D8F; }
+.tr-bar.is-zero { height: 2px !important; opacity: .5; }
+.tr-bar.is-none { height: 0; }
+.tr-group:hover .tr-bar, .tr-group:focus-visible .tr-bar { filter: brightness(1.15); }
+.tr-gtip { bottom: calc(100% - 6px); left: 50%; transform: translateX(-50%); opacity: 0; transition: opacity .12s; }
+.tr-group:first-child .tr-gtip { left: 0; transform: none; }
+.tr-group:last-child .tr-gtip { left: auto; right: 0; transform: none; }
+.tr-group:hover .tr-gtip, .tr-group:focus-visible .tr-gtip { opacity: 1; }
+.tr-gtip .chg { display: block; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--rule); color: var(--ink-3); white-space: nowrap; }
+.tr-gtip .up { color: var(--green); font-weight: 700; }
+.tr-gtip .down { color: var(--ink); font-weight: 700; }
+.tr-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; margin-left: auto; font-size: 12.5px; color: var(--ink-2); }
+.tr-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.tr-legend i { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.tr-empty { padding: 60px 0; text-align: center; font-size: 13px; color: var(--ink-3); }
+
+/* ── Table view ── */
+.tr-table { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 10px; }
+.tr-table summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--brand-blue); width: max-content; }
+.tr-table-wrap { overflow-x: auto; margin-top: 10px; }
+.tr-table table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.tr-table th, .tr-table td { padding: 6px 10px; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+.tr-table th:first-child { text-align: left; }
+.tr-table thead th { font-size: 12px; color: var(--ink-2); background: var(--paper-2); }
+.tr-table tbody th { font-weight: 600; color: var(--ink); }
+
+@media (max-width: 1199px) { .tr-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .an-toolbar { padding: 12px; }
+  .tr-meta { margin-left: 0; width: 100%; }
+  .tr-legend { margin-left: 0; }
+  .tr-frame.is-bars { height: 200px; }
+  .tr-x span:nth-child(even) { visibility: hidden; }
+}
+@media print {
+  .tr-grid { grid-template-columns: 1fr 1fr !important; }
+  .tr-card { box-shadow: none !important; break-inside: avoid; }
+  .tr-tip, .tr-gtip, .tr-cross { display: none !important; }
+  .tr-box { border: 0 !important; }
+}
+</style>
+
+<script>
+(function () {
+  // Hovering either small chart reads both: one crosshair, the same period, both values.
+  const plots = [...document.querySelectorAll('[data-pair-plot]')];
+  if (!plots.length) return;
+  const data = JSON.parse(document.getElementById('tr-data').textContent);
+  const n = data.labels.length;
+  let index = null;
+
+  function show(i, owner) {
+    index = Math.max(0, Math.min(n - 1, i));
+    const pct = (index + 0.5) / n * 100;
+    plots.forEach(plot => {
+      const cross = plot.querySelector('.tr-cross');
+      cross.style.left = pct + '%';
+      cross.hidden = false;
+      const tip = plot.querySelector('.tr-tip');
+      tip.hidden = plot !== owner;
+      if (plot !== owner) return;
+      tip.replaceChildren();                       // textContent only: labels are data
+      const head = document.createElement('b');
+      head.textContent = data.labels[index];
+      tip.append(head);
+      data.series.forEach(s => {
+        const row = document.createElement('div');
+        const key = document.createElement('i');
+        key.style.background = s.color;
+        const value = document.createElement('strong');
+        value.className = 'fig';
+        value.textContent = s.values[index] ?? '—';
+        const name = document.createElement('span');
+        name.textContent = s.label;
+        row.append(key, value, name);
+        tip.append(row);
+      });
+      const w = plot.clientWidth, tw = tip.offsetWidth, x = pct / 100 * w;
+      tip.style.left = (x + 12 + tw > w ? Math.max(0, x - 12 - tw) : x + 12) + 'px';
+    });
+  }
+  function hide() { plots.forEach(p => { p.querySelector('.tr-cross').hidden = true; p.querySelector('.tr-tip').hidden = true; }); }
+
+  plots.forEach(plot => {
+    plot.addEventListener('pointermove', e => {
+      const r = plot.getBoundingClientRect();
+      show(Math.floor((e.clientX - r.left) / r.width * n), plot);
+    });
+    plot.addEventListener('pointerleave', () => { if (!plots.includes(document.activeElement)) hide(); });
+    plot.addEventListener('focus', () => show(index ?? n - 1, plot));
+    plot.addEventListener('blur', hide);
+    plot.addEventListener('keydown', e => {
+      const moves = { ArrowLeft: -1, ArrowRight: 1, Home: -n, End: n };
+      if (!(e.key in moves)) return;
+      e.preventDefault();
+      show((index ?? n - 1) + moves[e.key], plot);
+    });
+  });
+})();
+</script>
+{% endblock %}

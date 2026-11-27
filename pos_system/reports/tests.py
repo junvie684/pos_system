@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from sales.models import Sale
+from tenants.middleware import tenant_context
 from tenants.test_utils import make_product, make_refund, make_sale, make_tenant, make_user, pos_login
 
 
@@ -137,42 +138,6 @@ class ShiftReportCashSplitTests(TestCase):
 
 
 # ─── Analytics page ─────────────────────────────────────────────
-class AnalyticsPageTests(TestCase):
-    """Today: two cash sales of Soap and one GCash sale of Rice. Yesterday: one Soap sale."""
-    databases = {'default', 'archive'}   # analytics also reads the archive database
-
-    def setUp(self):
-        self.tenant = make_tenant('store-a')
-        self.manager = make_user(self.tenant, 'manager1', role='manager')
-        soap = make_product(self.tenant, name='Soap', price='50.00', stock=100)
-        rice = make_product(self.tenant, name='Rice', price='200.00', stock=100)
-        make_sale(self.tenant, self.manager, soap, qty=2)
-        make_sale(self.tenant, self.manager, soap, qty=1)
-        gcash = make_sale(self.tenant, self.manager, rice, qty=1)
-        Sale.all_objects.filter(pk=gcash.pk).update(payment_method='gcash')
-        old = make_sale(self.tenant, self.manager, soap, qty=1)
-        Sale.all_objects.filter(pk=old.pk).update(created_at=timezone.now() - timezone.timedelta(days=1))
-        pos_login(self.client, self.manager)
-
-    def test_every_mode_renders(self):
-        for mode in ('daily', 'weekly', 'monthly'):
-            with self.subTest(mode=mode):
-                self.assertEqual(self.client.get('/reports/analytics/', {'mode': mode}).status_code, 200)
-
-    def test_daily_figures_top_products_and_payment_mix(self):
-        ctx = self.client.get('/reports/analytics/', {'mode': 'daily'}).context
-        self.assertEqual(ctx['curr_count'], 3)
-        self.assertEqual(ctx['curr_items'], 4)
-        self.assertEqual(ctx['prev_items'], 1)
-        self.assertEqual(ctx['curr_revenue'], dec(350))
-        self.assertEqual([p['product__name'] for p in ctx['top_products']], ['Rice', 'Soap'])
-        mix = {m['label']: m for m in ctx['payment_mix']}
-        self.assertEqual(mix['Cash']['count'], 2)
-        self.assertEqual(mix['Cash']['amount'], dec(150))
-        self.assertEqual(mix['GCash']['amount'], dec(200))
-        self.assertTrue(ctx['is_current'])
-
-
 class CashClosingPageTests(TestCase):
     def setUp(self):
         self.tenant = make_tenant('store-a')
@@ -195,3 +160,154 @@ class CashClosingPageTests(TestCase):
         self.assertEqual(rows['GCash']['count'], 1)
         self.assertEqual(ctx['net_amount'], 600.0)
         self.assertNotContains(resp, '<table')
+
+
+# ─── Analytics › Performance tab ────────────────────────────────
+class PerformanceTests(TestCase):
+    """At 7:40 PM on Mar 11, "Today" is compared with Mar 10 until 7:40 PM."""
+    databases = {'default', 'archive'}   # reads the archive database too
+
+    def setUp(self):
+        self.tenant = make_tenant('store-a')
+        self.manager = make_user(self.tenant, 'manager1', role='manager')
+        self.product = make_product(self.tenant, price='50.00', stock=100)
+        self.now = at(11, 19).replace(minute=40)
+
+    def sale(self, when, qty=1, status='completed'):
+        s = make_sale(self.tenant, self.manager, self.product, qty=qty, status=status)
+        Sale.all_objects.filter(pk=s.pk).update(created_at=when)
+        return s
+
+    def test_today_compares_with_yesterday_to_the_same_time(self):
+        from reports.performance import collect
+        self.sale(at(11, 10), qty=2)
+        self.sale(at(11, 12), qty=1, status='refunded')   # sold, then refunded: still in Sales
+        self.sale(at(10, 10), qty=3)
+        self.sale(at(10, 21), qty=5)                      # after 7:40 PM: on the chart, not in the change
+        self.sale(at(4, 9))                               # same day last week
+        with tenant_context(self.tenant.id):              # a store sees only its own sales
+            data = collect('today', self.now)
+
+        self.assertEqual((data['so_far'].units, data['so_far'].lines, data['so_far'].revenue), (3, 2, dec('150.00')))
+        self.assertEqual((data['prior_so_far'].units, data['prior_so_far'].lines), (3, 1))
+        current, prior, last_week, last_year = data['series']
+        self.assertEqual(current.buckets[10].units, 2)
+        self.assertEqual(prior.buckets[21].units, 5)
+        self.assertEqual(last_week.buckets[9].units, 1)
+        self.assertEqual(last_year.key, 'last_year')
+        self.assertEqual(data['last_bucket'], 19)
+        self.assertEqual(data['so_far'].value('units_per_line'), dec('1.5'))
+        self.assertEqual(data['so_far'].value('sales_per_line'), dec('75'))
+
+    def test_shorter_prior_month_has_no_points_past_its_end(self):
+        from reports.performance import collect
+        with tenant_context(self.tenant.id):
+            data = collect('month', at(15))
+        self.assertEqual(data['n'], 31)                   # March
+        self.assertEqual(data['lengths']['prior'], 28)    # February 2026
+        self.assertEqual(data['lengths']['last_year'], 31)
+
+    def test_page_renders_every_period_and_figure(self):
+        from reports.performance import METRICS, PERIODS
+        self.sale(timezone.now() - timezone.timedelta(minutes=5), qty=2)
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/reports/analytics/')
+        self.assertContains(resp, 'Real-time sales performance')
+        self.assertContains(resp, 'Today so far')
+        for period in PERIODS:
+            for metric in METRICS:
+                with self.subTest(period=period, metric=metric):
+                    r = self.client.get(f'/reports/analytics/?period={period}&metric={metric}')
+                    self.assertEqual(r.status_code, 200)
+        r = self.client.get('/reports/analytics/?period=bogus&metric=bogus')
+        self.assertEqual(r.context['period'], 'today')
+        self.assertEqual(r.context['metric'], 'units')
+
+    def test_csv_export(self):
+        self.sale(timezone.now() - timezone.timedelta(minutes=5), qty=2)
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/reports/analytics/?period=7d&export=csv')
+        self.assertEqual(resp['Content-Type'], 'text/csv')
+        body = resp.content.decode()
+        self.assertIn('Sales / order item', body)
+        self.assertIn('Previous 7 days (same point)', body)
+
+    def test_old_tab_links_open_the_report(self):
+        pos_login(self.client, self.manager)
+        for mode in ('daily', 'weekly', 'monthly'):
+            with self.subTest(mode=mode):
+                self.assertContains(self.client.get(f'/reports/analytics/?mode={mode}'),
+                                    'Real-time sales performance')
+
+    def test_needs_reports_access(self):
+        cashier = make_user(self.tenant, 'cashier1')
+        pos_login(self.client, cashier)
+        resp = self.client.get('/reports/analytics/')
+        self.assertEqual(resp.status_code, 302)
+
+
+# ─── Analytics › Trends tab ─────────────────────────────────────
+class TrendsTests(TestCase):
+    """Friday Nov 27, 2026: the last complete week is Wk 47 (Nov 16–22)."""
+    databases = {'default', 'archive'}   # reads the archive database too
+
+    def setUp(self):
+        self.tenant = make_tenant('store-a')
+        self.manager = make_user(self.tenant, 'manager1', role='manager')
+        self.product = make_product(self.tenant, price='50.00', stock=100)
+
+    def sale(self, when, qty=1):
+        s = make_sale(self.tenant, self.manager, self.product, qty=qty)
+        Sale.all_objects.filter(pk=s.pk).update(created_at=when)
+
+    def test_periods_are_complete_and_matched_a_year_back(self):
+        from datetime import date
+        from reports.trends import build_periods
+        today = date(2026, 11, 27)
+        weeks = build_periods('weekly', today)
+        self.assertEqual(len(weeks), 8)
+        self.assertEqual((weeks[-1].label, weeks[-1].start, weeks[-1].end),
+                         ('Wk 47', date(2026, 11, 16), date(2026, 11, 23)))
+        self.assertEqual(weeks[-1].ly_start, date(2025, 11, 17))     # Wk 47 of 2025
+        months = build_periods('monthly', today)
+        self.assertEqual([m.label for m in months], ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'])
+        self.assertEqual(months[0].ly_start, date(2025, 5, 1))
+        quarters = build_periods('quarterly', today)
+        self.assertEqual([(q.label, q.start) for q in quarters],
+                         [('Q4 2025', date(2025, 10, 1)), ('Q1 2026', date(2026, 1, 1)),
+                          ('Q2 2026', date(2026, 4, 1)), ('Q3 2026', date(2026, 7, 1))])
+
+    def test_totals_per_week_and_last_year_leave_out_this_week(self):
+        from reports.trends import collect
+        self.sale(timezone.make_aware(datetime(2026, 11, 18, 10)), qty=3)   # Wk 47
+        self.sale(timezone.make_aware(datetime(2025, 11, 18, 10)), qty=2)   # Wk 47 last year
+        self.sale(timezone.make_aware(datetime(2026, 11, 24, 10)), qty=9)   # this week: not complete
+        with tenant_context(self.tenant.id):
+            data = collect('weekly', timezone.make_aware(datetime(2026, 11, 27, 15)))
+        self.assertEqual(data['current'][-1].units, 3)
+        self.assertEqual(data['last_year'][-1].units, 2)
+        self.assertEqual(sum(t.units for t in data['current']), 3)
+
+    def test_page_renders_every_cadence_and_figure_with_tabs(self):
+        from reports.performance import METRICS
+        from reports.trends import CADENCES
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/reports/analytics/?tab=trends')
+        self.assertContains(resp, 'Business trends year over year')
+        self.assertContains(resp, 'class="module-tab is-on" aria-current="page">\n    <i class="bi bi-bar-chart-line"')
+        for cadence in CADENCES:
+            for metric in METRICS:
+                with self.subTest(cadence=cadence, metric=metric):
+                    r = self.client.get('/reports/analytics/', {'tab': 'trends', 'cadence': cadence,
+                                                                'metric': metric, 'compare': metric, 'yoy': metric})
+                    self.assertEqual(r.status_code, 200)
+        r = self.client.get('/reports/analytics/', {'tab': 'trends', 'cadence': 'x', 'metric': 'x'})
+        self.assertEqual((r.context['cadence'], r.context['m1']), ('weekly', 'revenue'))
+        # The Performance tab shows the same tab bar
+        self.assertContains(self.client.get('/reports/analytics/'), 'href="?tab=trends"')
+
+    def test_csv_export(self):
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/reports/analytics/?tab=trends&cadence=monthly&export=csv')
+        self.assertEqual(resp['Content-Type'], 'text/csv')
+        self.assertIn('Sales last year', resp.content.decode())
