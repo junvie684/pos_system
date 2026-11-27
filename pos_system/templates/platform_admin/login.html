@@ -1,42 +1,119 @@
 {% extends 'base.html' %}
-{% block title %}Platform sign in — POS{% endblock %}
+{% load static %}
+{% block title %}Platform sign in — SafePOS{% endblock %}
 {% block content %}
-<div class="login-wrap">
-  <div class="login-box">
-    <div class="login-head">
-      <h1>Platform console</h1>
-      <p>For the operator of the service. Store staff sign in on the <a href="{% url 'accounts:login' %}">store sign-in page</a>.</p>
-    </div>
-    <div class="card">
-      {% if form.non_field_errors %}
-      <div class="alert alert-error" style="margin-bottom:16px">
+<main class="signin" aria-labelledby="pl-login-title">
+  <div class="signin-slip">
+    <header class="signin-brand">
+      <p class="signin-wordmark"><span class="wm-safe">Safe</span>POS</p>
+      <p class="signin-tagline">Platform console</p>
+      <p class="signin-desc">For the operator of the service</p>
+    </header>
+
+    <h1 id="pl-login-title">Sign in</h1>
+    <p class="signin-lede">Store staff sign in on the <a href="{% url 'accounts:login' %}">store sign-in page</a>.</p>
+
+    {% if form.non_field_errors %}
+    <div class="signin-notes">
+      <div class="alert alert-error" role="alert">
         <i class="bi bi-x-circle" aria-hidden="true"></i>
-        {{ form.non_field_errors|join:", " }}
+        <span>{{ form.non_field_errors|join:" " }}</span>
       </div>
-      {% endif %}
-      <form method="post" novalidate>
-        {% csrf_token %}
-        <div class="form-group">
-          <label class="form-label" for="pl-username">Username</label>
-          <input class="form-control" type="text" name="username" id="pl-username" value="{{ form.username.value|default:'' }}" autofocus autocomplete="username">
-          {% if form.username.errors %}<div class="field-err">{{ form.username.errors|join:", " }}</div>{% endif %}
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="pl-password">Password</label>
-          <input class="form-control" type="password" name="password" id="pl-password" autocomplete="current-password">
-          {% if form.password.errors %}<div class="field-err">{{ form.password.errors|join:", " }}</div>{% endif %}
-        </div>
-        <button type="submit" class="btn btn-primary login-submit">Sign in</button>
-      </form>
     </div>
+    {% endif %}
+
+    <form method="post" class="signin-form" novalidate>
+      {% csrf_token %}
+      <div class="form-group">
+        <label class="form-label" for="pl-username">Username</label>
+        <input class="form-control" type="text" name="username" id="pl-username"
+               value="{{ form.username.value|default:'' }}" autofocus autocomplete="username"
+               autocapitalize="none" spellcheck="false"
+               {% if form.username.errors %}aria-invalid="true" aria-describedby="pl-username-error"{% endif %}>
+        {% if form.username.errors %}<div class="field-err" id="pl-username-error">{{ form.username.errors|join:" " }}</div>{% endif %}
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="pl-password">Password</label>
+        <input class="form-control" type="password" name="password" id="pl-password" autocomplete="current-password"
+               {% if form.password.errors %}aria-invalid="true" aria-describedby="pl-password-error"{% endif %}>
+        {% if form.password.errors %}<div class="field-err" id="pl-password-error">{{ form.password.errors|join:" " }}</div>{% endif %}
+      </div>
+      <button type="submit" class="btn btn-primary signin-submit">Sign in</button>
+    </form>
+
+    <footer class="signin-maker">
+      <span>A product of</span>
+      <img src="{% static 'brand/safetech-logo.png' %}" alt="SafeTech Data IT Solutions Co." width="120" height="68">
+    </footer>
+    <div class="signin-foot" aria-hidden="true"></div>
   </div>
-</div>
+</main>
+
 <style>
-.login-wrap { min-height: calc(100dvh - 48px); display: flex; align-items: center; justify-content: center; }
-.login-box { width: 100%; max-width: 380px; }
-.login-head { margin-bottom: 20px; }
-.login-head h1 { font-size: 28px; font-weight: 800; letter-spacing: -.3px; }
-.login-head p { color: var(--ink-2); margin-top: 4px; }
-.login-submit { width: 100%; min-height: 48px; font-size: 16px; margin-top: 4px; }
+/* Same card as the store sign-in (accounts/login.html); brand tokens live in base.html */
+.content:has(> .signin) { padding: 0; }
+.signin {
+  min-height: 100dvh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 48px 16px 72px;
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 0%, rgba(168,220,234,.45), transparent 70%),
+    var(--paper);
+}
+.signin-slip {
+  position: relative; overflow: hidden;
+  width: min(100%, 400px);
+  padding: 36px 32px 0;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px -18px rgba(6,47,110,.25), 0 0 0 1px rgba(6,47,110,.08);
+}
+.signin-slip::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 4px;
+  background: var(--brand-stripe);
+}
+.signin-brand {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  margin-bottom: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--rule);
+}
+.signin-wordmark { font-size: 30px; font-weight: 800; letter-spacing: -.5px; line-height: 1; color: var(--brand-navy); }
+.signin-wordmark .wm-safe { color: var(--brand-blue); }
+.signin-tagline { margin-top: 8px; font-size: 15px; font-weight: 700; color: var(--brand-navy); }
+.signin-desc { margin-top: 4px; font-size: 13px; color: var(--ink-3); }
+
+.signin-slip h1 { font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: -.3px; color: var(--brand-navy); }
+.signin-lede { margin-top: 6px; color: var(--ink-2); font-size: 15px; line-height: 1.45; }
+.signin-lede a { color: var(--brand-blue); font-weight: 600; }
+
+.signin-notes { display: grid; gap: 8px; margin-top: 20px; }
+.signin-notes .alert { margin: 0; }
+
+.signin-form { margin-top: 22px; padding-top: 22px; border-top: 1px dashed var(--rule-strong); }
+.signin-form .form-group { margin-bottom: 16px; }
+.signin-form .form-control { min-height: 46px; font-size: 16px; }
+.signin-form .form-control[aria-invalid="true"] { border-color: var(--red); }
+.field-err { color: var(--red); font-size: 13px; font-weight: 600; margin-top: 6px; }
+
+.signin-submit { width: 100%; min-height: 48px; margin-top: 8px; font-size: 16px; color: #fff; }
+.signin-submit:focus-visible { outline: 3px solid var(--brand-cyan); outline-offset: 2px; }
+
+.signin-maker {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  margin-top: 24px; color: var(--ink-3); font-size: 12px;
+}
+.signin-maker img { width: 120px; height: auto; }
+
+.signin-foot { margin: 20px -32px 0; height: 12px; border-top: 1px solid var(--rule); background: #F3F8FB; }
+
+@media (max-width: 480px) {
+  .signin { justify-content: flex-start; padding-top: 32px; }
+  .signin-slip { padding: 28px 20px 0; }
+  .signin-foot { margin-inline: -20px; }
+}
 </style>
+<script>
+  // A copy restored from the browser's memory reloads, so a signed-in admin is
+  // sent on to the console instead of seeing this form again.
+  window.addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
 {% endblock %}

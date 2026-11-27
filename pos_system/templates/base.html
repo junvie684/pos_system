@@ -4,8 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{ csrf_token }}">
-  <title>{% block title %}POS System{% endblock %}</title>
+  <title>{% block title %}SafePOS{% endblock %}</title>
   {% load static %}
+  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'brand/favicon-32.png' %}">
+  <link rel="apple-touch-icon" href="{% static 'brand/safetech-mark-180.png' %}">
   <link href="{% static 'icons/bootstrap-icons.css' %}" rel="stylesheet">
   <style>
     /* ── Type: self-hosted, offline-safe ──────────────────── */
@@ -26,16 +28,23 @@
     }
 
     :root {
-      /* Receipt Book world */
-      --paper: #FAFAF7;
-      --paper-2: #F3F3EF;
+      /* SafeTech brand, sampled from the company logo */
+      --brand-navy: #062F6E;
+      --brand-blue: #0B6FB0;
+      --brand-cyan: #1FA6CC;
+      --brand-sky: #A8DCEA;
+      --brand-stripe: linear-gradient(90deg, var(--brand-navy), var(--brand-blue), var(--brand-cyan), var(--brand-sky));
+
+      /* Receipt Book world, tinted to the SafeTech blues */
+      --paper: #F4F8FB;
+      --paper-2: #EAF1F7;
       --panel: #FFFFFF;
-      --ink: #1E2430;
-      --ink-2: #4A5263;
-      --ink-3: #626A7B;
-      --ink-deep: #0F141C;
-      --rule: #E3E3DD;
-      --rule-strong: #C3C8D0;
+      --ink: #13294B;
+      --ink-2: #46556D;
+      --ink-3: #5A6880;
+      --ink-deep: #0A1D3D;
+      --rule: #DCE5EE;
+      --rule-strong: #B9C7D8;
       --red: #B3242B;
       --red-hover: #962027;
       --red-tint: #FBEAEA;
@@ -51,13 +60,13 @@
       --red-rule: #EBC4C6;
       --red-ink: #9E1F26;
       --red-ink-deep: #8E1C22;
-      --chip-rule: #D6D8DC;
-      --rail-ink-muted: #C9D0DC;
-      --rail: #1E2430;
-      --rail-2: #283040;
-      --rail-line: #333B4A;
-      --rail-ink: #E1E5EC;
-      --rail-muted: #9AA3B4;
+      --chip-rule: #D2DCE7;
+      --rail-ink-muted: #C9D6E8;
+      --rail: var(--brand-navy);
+      --rail-2: #0B3F86;
+      --rail-line: #1C4A86;
+      --rail-ink: #E3ECF7;
+      --rail-muted: #A9BCD8;
 
       --font-ui: 'Source Sans 3', system-ui, -apple-system, 'Segoe UI', sans-serif;
       --font-fig: 'JetBrains Mono', 'Source Sans 3', ui-monospace, Consolas, monospace;
@@ -72,7 +81,7 @@
       --navy3: var(--paper-2);
       --card: var(--panel);
       --accent: var(--ink);
-      --accent2: #0F141C;
+      --accent2: var(--ink-deep);
       --amber: var(--amber-ink);
       --danger: var(--red);
       --text: var(--ink);
@@ -82,7 +91,7 @@
 
       --color-background-primary: var(--panel);
       --color-background-secondary: var(--paper-2);
-      --color-background-tertiary: #ECECE7;
+      --color-background-tertiary: #E2EBF3;
       --color-text-primary: var(--ink);
       --color-text-secondary: var(--ink-2);
       --color-text-tertiary: var(--ink-3);
@@ -90,7 +99,7 @@
       --color-text-success: var(--green);
       --color-text-danger: var(--red);
       --color-border-primary: var(--rule-strong);
-      --color-border-secondary: #D6D8DC;
+      --color-border-secondary: #D2DCE7;
       --color-border-tertiary: var(--rule);
     }
 
@@ -108,7 +117,7 @@
       -webkit-font-smoothing: antialiased;
     }
     ::selection { background: var(--carbon); color: var(--ink); }
-    :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+    :focus-visible { outline: 2px solid var(--brand-blue); outline-offset: 2px; }
     button, input, select, textarea { font: inherit; color: inherit; }
     a { color: var(--carbon-ink); text-underline-offset: 3px; }
     .fig, .mono { font-family: var(--font-fig); font-variant-numeric: tabular-nums; }
@@ -131,8 +140,15 @@
       z-index: 100;
     }
     .sidebar :focus-visible { outline-color: #fff; }
+    /* Brand stripe along the top of the rail, matching the sign-in card */
+    .sidebar::before { content: ""; height: 4px; flex: none; background: var(--brand-stripe); }
+    .sidebar-wordmark {
+      font-size: 13px; font-weight: 800; letter-spacing: .2px; line-height: 1;
+      color: #fff; margin-bottom: 10px;
+    }
+    .sidebar-wordmark .wm-safe { color: #5CC8E6; }
     .sidebar-brand {
-      padding: 18px 16px 16px 20px;
+      padding: 16px 16px 16px 20px;
       border-bottom: 1px solid var(--rail-line);
       display: flex;
       align-items: flex-start;
@@ -177,8 +193,8 @@
     .nav-item i { font-size: 17px; width: 18px; text-align: center; color: var(--rail-muted); transition: color .12s; }
     .nav-item:hover { background: var(--rail-2); color: #fff; }
     .nav-item:hover i { color: var(--rail-ink); }
-    .nav-item.active { background: var(--paper); color: var(--ink); font-weight: 700; }
-    .nav-item.active i { color: var(--ink); }
+    .nav-item.active { background: var(--paper); color: var(--ink); font-weight: 700; box-shadow: inset 4px 0 0 var(--brand-cyan); }
+    .nav-item.active i { color: var(--brand-blue); }
     .sidebar-footer { padding: 12px 12px 14px; border-top: 1px solid var(--rail-line); }
     .user-menu { position: relative; }
     .user-pill {
@@ -302,8 +318,8 @@
       white-space: nowrap;
     }
     .btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
-    .btn-primary { background: var(--ink); color: #fff; }
-    .btn-primary:hover { background: #0F141C; color: #fff; }
+    .btn-primary { background: var(--brand-navy); color: #fff; }
+    .btn-primary:hover { background: var(--brand-blue); color: #fff; }
     .btn-commit { background: var(--red); color: #fff; }
     .btn-commit:hover { background: var(--red-hover); color: #fff; }
     .btn-ghost { background: var(--panel); color: var(--ink); border-color: var(--rule-strong); }
@@ -374,7 +390,7 @@
     }
     .form-control.fig { font-family: var(--font-fig); font-variant-numeric: tabular-nums; }
     .form-control::placeholder { color: #7A8191; }
-    .form-control:focus { border-color: var(--ink); box-shadow: 0 0 0 3px var(--carbon); }
+    .form-control:focus { border-color: var(--brand-blue); box-shadow: 0 0 0 3px rgba(11,111,176,.18); }
     .form-control option { background: var(--panel); color: var(--ink); }
 
     /* ── Alerts ────────────────────────────────────────── */
@@ -667,6 +683,7 @@
 <aside class="sidebar" id="appSidebar" aria-label="Primary navigation">
   <div class="sidebar-brand">
     <div class="sidebar-brand-text">
+      <div class="sidebar-wordmark"><span class="wm-safe">Safe</span>POS</div>
       <div class="store-name">{% if current_tenant %}{{ current_tenant.name }}{% else %}Point of Sale{% endif %}</div>
       {% if current_tenant.tin %}<div class="store-meta">TIN {{ current_tenant.tin }}</div>{% endif %}
     </div>

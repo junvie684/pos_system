@@ -1,8 +1,15 @@
 {% extends 'base.html' %}
-{% block title %}Sign in — POS{% endblock %}
+{% load static %}
+{% block title %}Sign in — SafePOS{% endblock %}
 {% block content %}
 <main class="signin" data-cashier-screen="sign-in" aria-labelledby="login-title">
   <div class="signin-slip">
+    <header class="signin-brand">
+      <p class="signin-wordmark"><span class="wm-safe">Safe</span>POS</p>
+      <p class="signin-tagline">Smart. Simple. Secure.</p>
+      <p class="signin-desc">Intelligent Point-of-Sale &amp; Business Management System</p>
+    </header>
+
     <h1 id="login-title">Sign in</h1>
     <p class="signin-lede">Use the account your store manager gave you.</p>
 
@@ -45,6 +52,11 @@
       <button type="submit" class="btn btn-primary signin-submit" id="signin-submit">Open register</button>
     </form>
 
+    <footer class="signin-maker">
+      <span>A product of</span>
+      <img src="{% static 'brand/safetech-logo.png' %}" alt="SafeTech Data IT Solutions Co." width="120" height="68">
+    </footer>
+
     <div class="signin-foot">
       <span>{% now "D j M Y" %}</span>
       <span>{% now "H:i" %}</span>
@@ -56,20 +68,46 @@
 
 <style>
 .content:has(> .signin) { padding: 0; }
+/* Brand tokens (--brand-*) live in base.html */
 .signin {
   min-height: 100dvh;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 48px 16px 72px;
-  background: var(--paper);
+  /* Near-white with a faint brand-blue wash at the top */
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 0%, rgba(168,220,234,.45), transparent 70%),
+    var(--paper);
 }
 .signin-slip {
+  position: relative; overflow: hidden;
   width: min(100%, 400px);
-  padding: 32px 32px 0;
+  padding: 36px 32px 0;
   background: var(--panel);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px -18px rgba(6,47,110,.25), 0 0 0 1px rgba(6,47,110,.08);
 }
-.signin-slip h1 { font-size: 28px; font-weight: 800; line-height: 1.15; letter-spacing: -.3px; color: var(--ink); }
+/* Accent stripe in the logo's blue ramp */
+.signin-slip::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 4px;
+  background: var(--brand-stripe);
+}
+/* ── SafePOS brand header ── */
+.signin-brand {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  margin-bottom: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--rule);
+}
+.signin-wordmark { font-size: 30px; font-weight: 800; letter-spacing: -.5px; line-height: 1; color: var(--brand-navy); }
+.signin-wordmark .wm-safe { color: var(--brand-blue); }
+.signin-tagline { margin-top: 8px; font-size: 15px; font-weight: 700; color: var(--brand-navy); }
+.signin-desc { margin-top: 4px; font-size: 13px; color: var(--ink-3); text-wrap: balance; }
+
+.signin-maker {
+  display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 10px;
+  margin-top: 24px; color: var(--ink-3); font-size: 12px;
+}
+.signin-maker img { width: 120px; height: auto; }
+
+.signin-slip h1 { font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: -.3px; color: var(--brand-navy); }
 .signin-lede { margin-top: 6px; color: var(--ink-2); font-size: 15px; line-height: 1.45; text-wrap: balance; }
 
 .signin-notes { display: grid; gap: 8px; margin-top: 20px; }
@@ -78,6 +116,7 @@
 .signin-form { margin-top: 22px; padding-top: 22px; border-top: 1px dashed var(--rule-strong); }
 .signin-form .form-group { margin-bottom: 16px; }
 .signin-form .form-control { min-height: 46px; font-size: 16px; }
+.signin-form .form-control:focus { border-color: var(--brand-blue); box-shadow: 0 0 0 3px rgba(11,111,176,.18); }
 .signin-form .form-control[aria-invalid="true"] { border-color: var(--red); }
 
 .pw-field { position: relative; }
@@ -95,13 +134,16 @@
 .caps-note:not(:empty) { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--amber-ink); font-size: 13px; font-weight: 600; }
 .field-err { color: var(--red); font-size: 13px; font-weight: 600; margin-top: 6px; }
 
-.signin-submit { width: 100%; min-height: 48px; margin-top: 8px; font-size: 16px; }
+.signin-submit { width: 100%; min-height: 48px; margin-top: 8px; font-size: 16px; background: var(--brand-navy); color: #fff; }
+.signin-submit:hover { background: var(--brand-blue); color: #fff; }
+.signin-submit:focus-visible { outline: 3px solid var(--brand-cyan); outline-offset: 2px; }
 .signin-submit[aria-busy="true"] { background: var(--ink-disabled); cursor: progress; }
 
 .signin-foot {
   display: flex; justify-content: space-between;
-  margin: 28px -32px 0; padding: 12px 32px;
-  border-top: 2px solid var(--ink);
+  margin: 20px -32px 0; padding: 12px 32px;
+  border-top: 1px solid var(--rule);
+  background: #F3F8FB;
   font-family: var(--font-fig); font-size: 11.5px; font-variant-numeric: tabular-nums;
   color: var(--ink-3);
 }
