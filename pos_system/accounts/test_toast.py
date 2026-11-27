@@ -26,9 +26,14 @@ class ServerMessagesUseTheToastTests(TestCase):
     def test_message_after_a_redirect_goes_to_the_toast_not_a_banner(self):
         sale = make_sale(self.tenant, self.cashier, make_product(self.tenant))
         pos_login(self.client, self.manager)
-        resp = self.client.post(f'/refund/{sale.pk}/', follow=True)
+        item = sale.items.model.all_objects.get(sale=sale)
+        resp = self.client.post(f'/refund/{sale.pk}/', {f'qty_{item.pk}': '1', f'restock_{item.pk}': 'on'},
+                                follow=True)
         html = resp.content.decode()
-        self.assertEqual(server_messages(html), [('success', f'Sale {sale} has been refunded and stock restored.')])
+        self.assertEqual(server_messages(html), [(
+            'success',
+            f'Refunded ₱50.00 for 1 item on {sale} (all returned to stock). The sale is now fully refunded.',
+        )])
         self.assertNotIn('class="alert alert-success"', html)
         self.assertNotIn('messages-container', html)
 
@@ -42,7 +47,7 @@ class ServerMessagesUseTheToastTests(TestCase):
         self.tenant.save()
         html = pos_login(self.client, self.cashier).content.decode()
         self.assertEqual(server_messages(html),
-                         [('error', 'This store has been deactivated. Please contact your administrator.')])
+                         [('error', 'This store has been deactivated. Please contact your system provider or system administrator for assistance.')])
 
     def test_platform_console_messages_use_the_toast(self):
         make_platform_admin('platform')

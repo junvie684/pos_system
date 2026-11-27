@@ -1,11 +1,13 @@
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
+from django.utils import timezone
 
 from products.models import Product
 from sales.models import Sale, SaleItem
+from tenants.middleware import tenant_context
 from tenants.test_utils import (
-    make_product, make_sale, make_tenant, make_user, pos_login, sale_post,
+    make_product, make_refund, make_sale, make_tenant, make_user, pos_login, sale_post,
 )
 
 
@@ -328,10 +330,16 @@ class DuplicateLineTests(SaleTestBase):
 
 # ─── C-6: refunds only for completed sales, recorded ────────────
 class RefundTests(SaleTestBase):
+    @staticmethod
+    def refund_all(sale):
+        """Form data refunding every item of a sale, back into stock."""
+        return {k: v for item in SaleItem.all_objects.filter(sale=sale)
+                for k, v in ((f'qty_{item.pk}', str(item.quantity)), (f'restock_{item.pk}', 'on'))}
+
     def test_refunding_pending_sale_is_rejected_and_stock_unchanged(self):
         pending = make_sale(self.tenant, self.cashier, self.product, qty=3, status='pending')
         pos_login(self.client, self.manager)
-        self.client.post(f'/refund/{pending.pk}/')
+        self.client.post(f'/refund/{pending.pk}/', self.refund_all(pending))
         pending.refresh_from_db()
         self.assertEqual(pending.status, 'pending')
         self.assertEqual(self.stock(), 10)
@@ -339,7 +347,7 @@ class RefundTests(SaleTestBase):
     def test_refund_restores_stock_and_records_who_and_when(self):
         sale = make_sale(self.tenant, self.cashier, self.product, qty=3)
         pos_login(self.client, self.manager)
-        self.client.post(f'/refund/{sale.pk}/')
+        self.client.post(f'/refund/{sale.pk}/', self.refund_all(sale))
         sale.refresh_from_db()
         self.assertEqual(sale.status, 'refunded')
         self.assertEqual(sale.refunded_by, self.manager)
@@ -349,16 +357,103 @@ class RefundTests(SaleTestBase):
     def test_second_refund_does_not_restore_stock_again(self):
         sale = make_sale(self.tenant, self.cashier, self.product, qty=3)
         pos_login(self.client, self.manager)
-        self.client.post(f'/refund/{sale.pk}/')
-        self.client.post(f'/refund/{sale.pk}/')
+        self.client.post(f'/refund/{sale.pk}/', self.refund_all(sale))
+        self.client.post(f'/refund/{sale.pk}/', self.refund_all(sale))
         self.assertEqual(self.stock(), 13)
 
     def test_cashier_cannot_refund(self):
         sale = make_sale(self.tenant, self.cashier, self.product, qty=3)
         pos_login(self.client, self.cashier)
-        self.client.post(f'/refund/{sale.pk}/')
+        self.client.post(f'/refund/{sale.pk}/', self.refund_all(sale))
         sale.refresh_from_db()
         self.assertEqual(sale.status, 'completed')
+
+
+class ItemRefundTests(SaleTestBase):
+    """Refunding some of a sale's items, choosing what goes back to stock."""
+    databases = {'default', 'archive'}   # reports and history also read the archive database
+
+    def setUp(self):
+        super().setUp()
+        self.rice = make_product(self.tenant, name='Rice', price='20.00', stock=10)
+        self.sale = make_sale(self.tenant, self.cashier, self.product, qty=3)      # 3 x 50
+        self.rice_line = SaleItem.all_objects.create(
+            tenant_id=self.tenant.id, sale=self.sale, product=self.rice, quantity=2, unit_price=Decimal('20.00'))
+        self.soap_line = SaleItem.all_objects.get(sale=self.sale, product=self.product)
+        pos_login(self.client, self.manager)
+
+    def post(self, **qty):
+        data = {}
+        for line, (n, restock) in qty.items():
+            item = getattr(self, f'{line}_line')
+            data[f'qty_{item.pk}'] = str(n)
+            if restock:
+                data[f'restock_{item.pk}'] = 'on'
+        return self.client.post(f'/refund/{self.sale.pk}/', data)
+
+    def test_refund_page_lists_each_item(self):
+        page = self.client.get(f'/refund/{self.sale.pk}/')
+        self.assertContains(page, f'name="qty_{self.soap_line.pk}"')
+        self.assertContains(page, f'name="restock_{self.rice_line.pk}"')
+
+    def test_part_refund_keeps_sale_completed_and_restocks_only_ticked_items(self):
+        from sales.models import Refund
+        self.post(soap=(1, True), rice=(2, False))
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.status, 'completed')
+        self.assertEqual(self.stock(), 11)                                            # soap restocked
+        self.assertEqual(Product.all_objects.get(pk=self.rice.pk).stock, 10)          # rice not
+        with tenant_context(self.tenant.id):
+            refund = Refund.objects.get(sale=self.sale)
+            self.assertEqual((refund.total, refund.refunded_by), (Decimal('90.00'), self.manager))
+            self.assertEqual(self.sale.refunded_amount, Decimal('90.00'))
+            self.assertEqual(self.sale.kept_total, Decimal('100.00'))
+
+    def test_second_refund_of_the_rest_marks_sale_refunded(self):
+        self.post(soap=(1, True))
+        self.post(soap=(2, True), rice=(2, True))
+        self.sale.refresh_from_db()
+        self.assertEqual(self.sale.status, 'refunded')
+        self.assertEqual(self.sale.refunded_by, self.manager)
+        with tenant_context(self.tenant.id):
+            self.assertEqual(self.sale.refunds.count(), 2)
+        self.assertEqual(self.stock(), 13)
+
+    def test_cannot_refund_more_than_is_left(self):
+        from sales.models import Refund
+        self.post(soap=(2, True))
+        resp = self.post(soap=(2, True))
+        self.assertRedirects(resp, f'/refund/{self.sale.pk}/', fetch_redirect_response=False)
+        self.assertEqual(Refund.all_objects.count(), 1)
+        self.assertEqual(self.stock(), 12)
+
+    def test_nothing_picked_or_bad_quantity_is_rejected(self):
+        from sales.models import Refund
+        self.post(soap=(0, True))
+        self.post(soap=(-1, True))
+        self.client.post(f'/refund/{self.sale.pk}/', {f'qty_{self.soap_line.pk}': 'two'})
+        self.assertFalse(Refund.all_objects.exists())
+
+    def test_part_refund_counts_on_its_own_day_in_reports(self):
+        self.post(rice=(1, True))
+        today = timezone.localdate().isoformat()
+        ctx = self.client.get('/reports/', {'day': today}).context
+        self.assertEqual(Decimal(str(ctx['refunds_total'])), Decimal('20.00'))
+        self.assertEqual(Decimal(str(ctx['gross_sales'])), Decimal('190.00'))
+        shift = self.client.get('/reports/shift_report/', {'day': today}).context
+        self.assertEqual(Decimal(str(shift['cash_refunds'])), Decimal('20.00'))
+        tile = self.client.get('/').context['tiles'][0]
+        self.assertEqual((tile['refunds'], tile['refund_cost']), (1, Decimal('20.00')))
+        rice = next(r for r in self.client.get('/').context['rows'] if r['name'] == 'Rice')
+        self.assertEqual((rice['refund_units'], rice['refund_cost']), (1, Decimal('20.00')))
+
+    def test_history_shows_partly_refunded(self):
+        self.post(rice=(1, True))
+        page = self.client.get('/history/')
+        self.assertContains(page, 'Partly refunded')
+        self.assertEqual(page.context['filtered_total'], Decimal('170.00'))
+        receipt = self.client.get(f'/receipt/{self.sale.pk}/')
+        self.assertContains(receipt, 'Kept after refunds')
 
 
 class OrNumberTests(SaleTestBase):
@@ -420,3 +515,208 @@ class OrNumberTests(SaleTestBase):
         pos_login(self.client, self.manager)
         resp = self.client.get('/history/', {'q': 'OR-000001'})
         self.assertEqual([s.pk for s in resp.context['sales']], [sale.pk])
+
+
+class PnlTests(SaleTestBase):
+    databases = {'default', 'archive'}   # the P&L also reads the archive database
+
+    def test_pnl_shows_monthly_sales_refunds_and_net(self):
+        from django.utils import timezone
+        make_sale(self.tenant, self.cashier, self.product, qty=3)            # 150.00
+        refunded = make_sale(self.tenant, self.cashier, self.product, qty=1)  # 50.00
+        make_refund(refunded)
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/pnl/')
+        self.assertEqual(resp.status_code, 200)
+        rows = {r['key']: r for r in resp.context['rows']}
+        self.assertEqual(len(resp.context['columns']), 12)
+        self.assertEqual(rows['sales']['values'][0], Decimal('200.00'))
+        self.assertEqual(rows['units']['values'][0], 4)
+        self.assertEqual(rows['txns']['values'][0], 2)
+        self.assertEqual(rows['refunds']['values'][0], 1)
+        self.assertEqual(rows['refund_cost']['values'][0], Decimal('-50.00'))
+        self.assertEqual(rows['net']['total'], Decimal('150.00'))
+        self.assertEqual(rows['refund_rate']['values'][0], 50)
+        self.assertEqual(rows['sales']['children'][0]['label'], 'Cash')
+        self.assertEqual(rows['avg']['values'][1], None)
+        self.assertContains(resp, '−₱50.00')
+
+    def test_pnl_csv_download(self):
+        make_sale(self.tenant, self.cashier, self.product, qty=2)
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/pnl/?months=3&format=csv')
+        self.assertEqual(resp['Content-Type'], 'text/csv; charset=utf-8')
+        body = resp.content.decode('utf-8-sig')
+        self.assertIn('Parameter,', body)
+        self.assertIn('₱100.00', body)
+        self.assertEqual(body.splitlines()[0].count(','), 4)
+
+    def test_pnl_needs_reports_access(self):
+        user = make_user(self.tenant, 'noreports', can_access_reports=False)
+        pos_login(self.client, user)
+        resp = self.client.get('/pnl/')
+        self.assertRedirects(resp, '/', fetch_redirect_response=False)
+        resp = self.client.get('/')
+        self.assertNotContains(resp, 'href="/pnl/"')
+
+    def test_dashboard_has_pnl_tab_for_reports_users(self):
+        pos_login(self.client, self.manager)
+        resp = self.client.get('/')
+        self.assertContains(resp, 'href="/pnl/"')
+
+
+class DashboardTilesTests(SaleTestBase):
+    databases = {'default', 'archive'}   # the tiles also read the archive database
+
+    def setUp(self):
+        super().setUp()
+        make_sale(self.tenant, self.cashier, self.product, qty=2)   # 100.00 today
+        pos_login(self.client, self.cashier)
+
+    def test_default_tiles_and_today_products(self):
+        resp = self.client.get('/')
+        self.assertEqual(resp.status_code, 200)
+        titles = [t['title'] for t in resp.context['tiles']]
+        self.assertEqual(titles, ['Today', 'Yesterday', 'Month to date', 'This month (forecast)', 'Last month'])
+        today = resp.context['tiles'][0]
+        self.assertEqual((today['sales'], today['txns'], today['units']), (Decimal('100.00'), 1, 2))
+        self.assertEqual(resp.context['groups'][0]['items'][0]['units'], 2)
+        self.assertContains(resp, 'Show details')
+
+    def test_every_preset_renders(self):
+        from reports.tiles import PRESETS
+        for key in PRESETS:
+            with self.subTest(key):
+                resp = self.client.get('/', {'preset': key, 'tile': 1, 'view': 'items'})
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(resp.context['preset'], key)
+
+    def test_custom_range_and_bad_input_fall_back(self):
+        resp = self.client.get('/', {'preset': 'custom', 'from': '2020-01-01', 'to': '2099-01-01'})
+        self.assertEqual([t['title'] for t in resp.context['tiles']], ['Custom range'])
+        self.assertEqual(resp.context['tiles'][0]['sales'], Decimal('100.00'))
+        resp = self.client.get('/', {'preset': 'custom', 'from': 'nope', 'tile': '99'})
+        self.assertEqual(resp.context['preset'], 'default')
+        self.assertEqual(resp.context['selected'], 0)
+
+    def test_order_items_and_flat_products(self):
+        resp = self.client.get('/', {'view': 'items'})
+        self.assertEqual(resp.context['line_total'], 1)
+        resp = self.client.get('/', {'group': 'none'})
+        self.assertIsNone(resp.context['groups'])
+        self.assertEqual(len(resp.context['rows']), 1)
+
+    def test_refund_counts_on_refund_day(self):
+        from django.utils import timezone
+        sale = make_sale(self.tenant, self.cashier, self.product, qty=1)
+        make_refund(sale)
+        tile = self.client.get('/').context['tiles'][0]
+        self.assertEqual((tile['refunds'], tile['refund_cost'], tile['net']),
+                         (1, Decimal('50.00'), Decimal('100.00')))
+
+
+class DashboardChartsTests(SaleTestBase):
+    databases = {'default', 'archive'}   # the charts also read the archive database
+
+    def setUp(self):
+        super().setUp()
+        make_sale(self.tenant, self.cashier, self.product, qty=2)   # 100.00 today
+        pos_login(self.client, self.cashier)
+
+    def test_default_chart_by_month_with_breakdowns(self):
+        resp = self.client.get('/charts/')
+        self.assertEqual(resp.status_code, 200)
+        ctx = resp.context
+        self.assertEqual((ctx['step'], len(ctx['series']['buckets'])), ('month', 12))
+        last = ctx['series']['buckets'][-1]
+        self.assertTrue(last['is_current'])
+        self.assertEqual(last['value'], Decimal('100.00'))
+        self.assertEqual(ctx['payments'][0]['label'], 'Cash')
+        self.assertEqual(ctx['top_products'][0]['value'], Decimal('100.00'))
+        self.assertEqual(ctx['cashiers'][0]['orders'], 1)
+        self.assertEqual(sum(1 for h in ctx['hours'] if h['value']), 1)
+        self.assertEqual(len(ctx['weekdays']), 7)
+
+    def test_ranges_and_metrics(self):
+        for rng, step, n in (('3m', 'week', 13), ('30d', 'day', 30)):
+            for metric in ('sales', 'net', 'txns', 'units', 'refunds', 'avg'):
+                with self.subTest(rng=rng, metric=metric):
+                    ctx = self.client.get('/charts/', {'range': rng, 'metric': metric}).context
+                    self.assertEqual((ctx['step'], len(ctx['series']['buckets'])), (step, n))
+        ctx = self.client.get('/charts/', {'range': '30d', 'metric': 'txns'}).context
+        self.assertEqual(ctx['series']['buckets'][-1]['value'], 1)
+
+    def test_custom_range_picks_step_and_bad_input_falls_back(self):
+        from django.utils import timezone
+        today = timezone.localdate()
+        ctx = self.client.get('/charts/', {'range': 'custom', 'from': (today.replace(day=1)).isoformat(),
+                                           'to': today.isoformat()}).context
+        self.assertEqual(ctx['step'], 'day')
+        ctx = self.client.get('/charts/', {'range': 'custom', 'from': 'x', 'metric': 'bogus'}).context
+        self.assertEqual((ctx['range_key'], ctx['metric']), ('12m', 'sales'))
+
+    def test_tabs_link_to_chart(self):
+        self.assertContains(self.client.get('/'), 'href="/charts/"')
+
+
+class NiceTicksTests(TestCase):
+    def test_ticks_cover_the_top_with_round_steps(self):
+        from reports.charts import nice_ticks
+        self.assertEqual(nice_ticks(3705), [0, 1000, 2000, 3000, 4000])
+        self.assertEqual(nice_ticks(4), [0, 1, 2, 3, 4])
+        self.assertEqual(nice_ticks(0), [0, 1])
+
+
+class RefundBackfillMigrationTests(TransactionTestCase):
+    """Sales refunded before item refunds existed become one full refund each."""
+    databases = {'default', 'archive'}
+
+    def test_old_refunded_sale_becomes_a_full_refund(self):
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+        from datetime import timedelta
+        from uuid import uuid4
+
+        executor = MigrationExecutor(connection)
+        before = ('sales', '0007_sale_or_number')
+        executor.migrate([before])
+        others = [n for n in executor.loader.graph.leaf_nodes() if n[0] not in ('sales', 'archive')]
+        old = executor.loader.project_state([before, *others]).apps
+        OldSale, OldItem = old.get_model('sales', 'Sale'), old.get_model('sales', 'SaleItem')
+        OldProduct = old.get_model('products', 'Product')
+        tenant = uuid4()
+        product = OldProduct.objects.create(tenant_id=tenant, name='Soap', price=Decimal('50.00'), stock=1)
+        sold = timezone.now() - timedelta(days=3)
+        dated = OldSale.objects.create(tenant_id=tenant, status='refunded', refunded_at=sold + timedelta(days=1))
+        legacy = OldSale.objects.create(tenant_id=tenant, status='refunded')       # no refund date
+        OldSale.objects.filter(pk=legacy.pk).update(created_at=sold)
+        kept = OldSale.objects.create(tenant_id=tenant, status='completed')
+        for sale in (dated, legacy, kept):
+            OldItem.objects.create(tenant_id=tenant, sale=sale, product=product, quantity=2, unit_price=Decimal('50.00'))
+
+        executor = MigrationExecutor(connection)
+        executor.loader.build_graph()
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
+        from sales.models import Refund, RefundItem
+        self.assertEqual(Refund.all_objects.count(), 2)
+        self.assertEqual(Refund.all_objects.get(sale_id=dated.pk).refunded_at, dated.refunded_at)
+        self.assertEqual(Refund.all_objects.get(sale_id=legacy.pk).refunded_at, sold)
+        line = RefundItem.all_objects.get(refund__sale_id=dated.pk)
+        self.assertEqual((line.quantity, line.unit_price, line.restocked), (2, Decimal('50.00'), True))
+        self.assertFalse(Refund.all_objects.filter(sale_id=kept.pk).exists())
+
+
+class DashboardPdfExportTests(SaleTestBase):
+    databases = {'default', 'archive'}
+
+    def test_every_tab_has_pdf_export_with_print_header(self):
+        pos_login(self.client, self.manager)
+        for url, title in (('/', 'Tiles'), ('/charts/', 'Chart'), ('/pnl/', 'P&amp;L')):
+            with self.subTest(url):
+                page = self.client.get(url)
+                self.assertContains(page, 'onclick="exportPdf()"')
+                self.assertContains(page, f'Dashboard · {title}')
+                self.assertContains(page, 'class="print-head"')
+                self.assertIn(timezone.localdate().isoformat(), page.context['print_filename_json'])
+                self.assertNotContains(page, 'PDF export for the Dashboard')   # comment stays hidden

@@ -5,7 +5,9 @@ from django.contrib.auth.models import User
 
 from accounts.models import UserProfile
 from products.models import Category, Product
-from sales.models import Sale, SaleItem
+from django.utils import timezone
+
+from sales.models import Refund, RefundItem, Sale, SaleItem
 from tenants.models import Tenant
 
 PASSWORD = 'S3cure-test-pass!'
@@ -55,11 +57,30 @@ def make_category(tenant, name='General'):
 
 
 def make_sale(tenant, cashier, product, qty=1, status='completed'):
-    sale = Sale.all_objects.create(tenant_id=tenant.id, cashier=cashier, status=status)
+    """A sale of one line. status='refunded' also records a full refund now."""
+    sale = Sale.all_objects.create(tenant_id=tenant.id, cashier=cashier,
+                                   status='completed' if status == 'refunded' else status)
     SaleItem.all_objects.create(
         tenant_id=tenant.id, sale=sale, product=product, quantity=qty, unit_price=product.price,
     )
+    if status == 'refunded':
+        make_refund(sale)
     return sale
+
+
+def make_refund(sale, when=None, by=None, qty=None, restocked=True):
+    """Record a refund of `qty` of each line (default: all of them) at `when`.
+    Marks the sale refunded once nothing is left, like the refund screen does.
+    Doesn't touch stock."""
+    when = when or timezone.now()
+    refund = Refund.all_objects.create(tenant_id=sale.tenant_id, sale=sale, refunded_by=by, refunded_at=when)
+    for item in SaleItem.all_objects.filter(sale=sale):
+        RefundItem.all_objects.create(tenant_id=sale.tenant_id, refund=refund, sale_item=item,
+                                      quantity=item.quantity if qty is None else qty,
+                                      unit_price=item.unit_price, restocked=restocked)
+    if qty is None:
+        Sale.all_objects.filter(pk=sale.pk).update(status='refunded', refunded_at=when, refunded_by=by)
+    return refund
 
 
 def pos_login(client, user):

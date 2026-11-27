@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from sales.models import Sale
-from tenants.test_utils import make_product, make_sale, make_tenant, make_user, pos_login
+from tenants.test_utils import make_product, make_refund, make_sale, make_tenant, make_user, pos_login
 
 
 def at(day, hour=10):
@@ -35,13 +35,15 @@ class RefundLedgerTests(TestCase):
         d = make_sale(self.tenant, self.cashier, product, qty=1)
         b = make_sale(self.tenant, self.cashier, product, qty=1)
         c = make_sale(self.tenant, self.cashier, product, qty=3)
-        Sale.all_objects.filter(pk=a.pk).update(created_at=at(10), status='refunded',
-                                                refunded_at=at(11, 15), refunded_by=self.manager)
-        Sale.all_objects.filter(pk=d.pk).update(created_at=at(10, 11), status='refunded', payment_method='gcash',
-                                                reference_number='R1', refunded_at=at(11, 16),
-                                                refunded_by=self.manager)
+        Sale.all_objects.filter(pk=a.pk).update(created_at=at(10))
+        make_refund(a, when=at(11, 15), by=self.manager)
+        Sale.all_objects.filter(pk=d.pk).update(created_at=at(10, 11), payment_method='gcash', reference_number='R1')
+        make_refund(d, when=at(11, 16), by=self.manager)
         Sale.all_objects.filter(pk=b.pk).update(created_at=at(11))
-        Sale.all_objects.filter(pk=c.pk).update(created_at=at(9), status='refunded')  # refunded_at NULL
+        # Legacy refund: no refund date or person was recorded, so the
+        # conversion dated it to the sale and left "refunded by" empty.
+        Sale.all_objects.filter(pk=c.pk).update(created_at=at(9))
+        make_refund(c, when=at(9))
 
         pos_login(self.client, self.manager)
 

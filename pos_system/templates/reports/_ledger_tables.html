@@ -62,18 +62,18 @@
   <div class="table-wrap">
     <table class="ledger-table rec-table">
       <thead>
-        <tr><th scope="col">OR No.</th><th scope="col">Refunded</th><th scope="col">Originally sold</th><th scope="col">Refunded by</th><th scope="col">Payment</th><th scope="col" class="num">Amount</th><th scope="col"><span class="sr-only">Status</span></th></tr>
+        <tr><th scope="col">OR No.</th><th scope="col">Refunded</th><th scope="col">Originally sold</th><th scope="col">Refunded by</th><th scope="col">Payment</th><th scope="col" class="num">Amount</th><th scope="col">Items returned</th></tr>
       </thead>
       <tbody>
-        {% for sale in refunds %}
+        {% for refund in refunds %}
         <tr>
-          <td class="rec-title serial-cell">{{ sale.or_display|default:"—" }} <span class="rec-id">ID {{ sale.pk }}</span></td>
-          <td class="rec-meta fig when">{{ sale.refund_time|date:"M d, H:i" }}</td>
-          <td class="rec-meta fig when">{{ sale.created_at|date:"M d, Y" }}</td>
-          <td class="rec-meta">{{ sale.refunded_by|default:sale.cashier }}</td>
-          <td class="rec-meta">{{ sale.get_payment_method_display }}</td>
-          <td class="rec-total num fig strong neg">− ₱{{ sale.total|floatformat:"2g" }}</td>
-          <td class="rec-foot"></td>
+          <td class="rec-title serial-cell">{{ refund.or_display|default:"—" }} <span class="rec-id">ID {{ refund.sale_id }}</span></td>
+          <td class="rec-meta fig when">{{ refund.refunded_at|date:"M d, H:i" }}</td>
+          <td class="rec-meta fig when">{{ refund.sale_created_at|date:"M d, Y" }}</td>
+          <td class="rec-meta">{{ refund.given_by|default:"—" }}</td>
+          <td class="rec-meta">{{ refund.get_payment_method_display }}</td>
+          <td class="rec-total num fig strong neg">− ₱{{ refund.total|floatformat:"2g" }}</td>
+          <td class="rec-meta refund-items">{{ refund.items_text }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -88,5 +88,6 @@
 .ledger-table .when { font-size: 13.5px; white-space: nowrap; }
 .ledger-table td.strong { color: var(--ink); font-weight: 700; }
 .ledger-table td.neg { color: var(--red-ink); }
+.ledger-table .refund-items { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .count { font-size: 12.5px; color: var(--ink-3); margin-left: 6px; }
 </style>

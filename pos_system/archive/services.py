@@ -16,10 +16,10 @@ from django.db import DatabaseError, transaction
 from django.db.models import F, Prefetch, Sum
 from django.utils import timezone
 
-from sales.models import Sale, SaleItem
+from sales.models import Refund, RefundItem, Sale, SaleItem
 from tenants.models import Tenant
 
-from .models import ArchivedSale, ArchivedSaleItem
+from .models import ArchivedRefund, ArchivedRefundItem, ArchivedSale, ArchivedSaleItem
 from .routers import ARCHIVE_DB
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,32 @@ def _copy(sales):
     return archived, lines
 
 
+def _copy_refunds(sales):
+    """[(ArchivedRefund, [ArchivedRefundItem])] for fully loaded Sale objects."""
+    out = []
+    for sale in sales:
+        for refund in sale.refunds.all():
+            items = [
+                ArchivedRefundItem(
+                    tenant_id=sale.tenant_id,
+                    product_id=ri.sale_item.product_id,
+                    product_name=ri.sale_item.product.name,
+                    quantity=ri.quantity,
+                    unit_price=ri.unit_price,
+                    restocked=ri.restocked,
+                )
+                for ri in refund.items.all()
+            ]
+            out.append((ArchivedRefund(
+                tenant_id=sale.tenant_id,
+                sale_id=sale.pk,
+                refunded_at=refund.refunded_at,
+                refunded_by_name=refund.refunded_by.get_username() if refund.refunded_by else '',
+                total=sum((i.quantity * i.unit_price for i in items), start=Decimal('0.00')),
+            ), items))
+    return out
+
+
 def archive_store(store, now=None, batch_size=BATCH_SIZE):
     """Move every paid sale past the store's retention period. Returns how many moved."""
     moved = 0
@@ -91,9 +117,14 @@ def archive_store(store, now=None, batch_size=BATCH_SIZE):
             sales = list(
                 Sale.all_objects.filter(pk__in=ids)
                 .select_related('customer', 'cashier', 'refunded_by')
-                .prefetch_related(Prefetch('items', queryset=SaleItem.all_objects.select_related('product')))
+                .prefetch_related(
+                    Prefetch('items', queryset=SaleItem.all_objects.select_related('product')),
+                    Prefetch('refunds', queryset=Refund.all_objects.select_related('refunded_by').prefetch_related(
+                        Prefetch('items', queryset=RefundItem.all_objects.select_related('sale_item__product')))),
+                )
             )
             archived, lines = _copy(sales)
+            refunds = _copy_refunds(sales)
             in_main = SaleItem.all_objects.filter(sale_id__in=ids).count()
             if len(lines) != in_main:
                 # Never delete lines that weren't copied; roll the batch back.
@@ -101,11 +132,20 @@ def archive_store(store, now=None, batch_size=BATCH_SIZE):
 
             with transaction.atomic(using=ARCHIVE_DB):
                 # Replace any copy left by an earlier run that stopped halfway.
+                ArchivedRefundItem.all_objects.filter(refund__sale_id__in=ids).delete()
+                ArchivedRefund.all_objects.filter(sale_id__in=ids).delete()
                 ArchivedSaleItem.all_objects.filter(sale_id__in=ids).delete()
                 ArchivedSale.all_objects.filter(pk__in=ids).delete()
                 ArchivedSale.all_objects.bulk_create(archived)
                 ArchivedSaleItem.all_objects.bulk_create(lines)
+                for refund, items in refunds:
+                    refund.save()
+                    for item in items:
+                        item.refund = refund
+                    ArchivedRefundItem.all_objects.bulk_create(items)
 
+            RefundItem.all_objects.filter(refund__sale_id__in=ids).delete()
+            Refund.all_objects.filter(sale_id__in=ids).delete()
             SaleItem.all_objects.filter(sale_id__in=ids).delete()
             Sale.all_objects.filter(pk__in=ids).delete()
         moved += len(ids)

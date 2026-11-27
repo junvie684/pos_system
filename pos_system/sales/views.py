@@ -1,6 +1,6 @@
 import re
 from django.contrib import messages
-from accounts.decorators import manager_or_admin_required, pos_login_required
+from accounts.decorators import feature_required, manager_or_admin_required, pos_login_required
 from django.db.models import Q
 from django.shortcuts import render, redirect, get_object_or_404
 
@@ -30,240 +30,227 @@ import logging
 from django.urls import reverse
 from django.views.decorators.http import require_GET
 
-from archive.history import archived_dashboard_totals
 
 logger = logging.getLogger(__name__)
 
 
 # ─── Dashboard ───────────────────────────────────────────────
+def _print_context(request, title, period):
+    """Header and file name for a Dashboard tab's PDF export (see partials/dashboard_print.html)."""
+    store = Tenant.objects.filter(id=request.session.get('tenant_id')).values_list('name', flat=True).first()
+    name = f"{store or 'POS'} - Dashboard {title} - {timezone.localdate():%Y-%m-%d}"
+    return {
+        'print_title': title,
+        'print_period': period,
+        'print_landscape': True,
+        'print_filename_json': json.dumps(re.sub(r'[\\/:*?"<>|]', '', name)),
+    }
+
+
+def _custom_range(request, today):
+    """(start, end) from ?from=&to= (either order, end capped at today), or None
+    with an error message if they aren't two valid dates."""
+    from datetime import date
+    try:
+        start = date.fromisoformat(request.GET.get('from', ''))
+        end = date.fromisoformat(request.GET.get('to', ''))
+    except ValueError:
+        start = end = None
+    if start and end:
+        start, end = min(start, end), min(max(start, end), today)
+        if start <= end:
+            return start, end
+    messages.error(request, 'Pick a start and end date for the custom range.')
+    return None
+
+
 @pos_login_required
 def dashboard(request):
+    """Tiles: period summaries across the top; the selected tile's products
+    (or sale lines) underneath."""
+    from reports.tiles import (
+        DEFAULT_PRESET, PRESETS, build_periods, build_tiles, date_label, group_rows,
+        order_items, product_rows,
+    )
 
     today = timezone.localdate()
-    seven_days_ago = today - timedelta(days=6)
+    preset = request.GET.get('preset', DEFAULT_PRESET)
+    custom, custom_from, custom_to = None, request.GET.get('from', ''), request.GET.get('to', '')
+    if preset == 'custom':
+        custom = _custom_range(request, today)
+        if custom is None:
+            preset = DEFAULT_PRESET
+    elif preset not in PRESETS:
+        preset = DEFAULT_PRESET
 
-    # ── Today's stats ─────────────────────────────────────────────
-    todays_sales = Sale.objects.filter(
-        status='completed',
-        created_at__date=today
-    ).prefetch_related('items')
+    periods = build_periods(preset, today, custom)
+    tiles, archive_unavailable = build_tiles(periods, today)
 
-    total_today = sum(s.total for s in todays_sales)
-    avg_sale    = (total_today / len(todays_sales)) if todays_sales else 0
+    try:
+        selected = int(request.GET.get('tile', 0))
+    except ValueError:
+        selected = 0
+    if not 0 <= selected < len(periods):
+        selected = 0
+    period = periods[selected]
+    end = min(period.end, today)
 
-    # ── Recent sales table (last 10 completed today) ───────────────
-    recent_sales = Sale.objects.filter(
-        status='completed',
-        created_at__date=today
-    ).order_by('-created_at')[:10]
+    view = 'items' if request.GET.get('view') == 'items' else 'products'
+    group = 'none' if request.GET.get('group') == 'none' else 'category'
 
-    # ── Revenue by day (last 7 days) ──────────────────────────────
-    daily_revenue = (
-        SaleItem.objects
-        .filter(
-            sale__status='completed',
-            sale__created_at__date__gte=seven_days_ago,
-        )
-        .annotate(day=TruncDate('sale__created_at'))
-        .values('day')
-        .annotate(revenue=Sum('unit_price') * 1)  # placeholder
-        .order_by('day')
-    )
-
-    # Build a proper day-by-day revenue using raw aggregation
-    from django.db.models import F as Fexpr
-    daily_qs = (
-        SaleItem.objects
-        .filter(sale__status='completed', sale__created_at__date__gte=seven_days_ago)
-        .annotate(day=TruncDate('sale__created_at'))
-        .values('day')
-        .annotate(revenue=Sum(Fexpr('quantity') * Fexpr('unit_price')))
-        .annotate(txns=Count('sale', distinct=True))
-        .order_by('day')
-    )
-
-    # Fill in missing days with 0
-    daily_map = {entry['day']: entry for entry in daily_qs}
-    chart_days, chart_revenue, chart_txns = [], [], []
-    for i in range(7):
-        day = seven_days_ago + timedelta(days=i)
-        entry = daily_map.get(day)
-        chart_days.append(day.strftime('%b %d'))
-        chart_revenue.append(float(entry['revenue']) if entry else 0)
-        chart_txns.append(entry['txns'] if entry else 0)
-
-    # ── All-time figures include sales moved to the archive database ──
-    from django.db.models import F as Fexpr
-    archived = archived_dashboard_totals(Sale.objects.filter(status__in=('completed', 'refunded')))
-    archive_unavailable = archived is None
-    if archived is None:
-        archived = {'products': {}, 'cashiers': {}, 'completed': 0, 'refunded': 0}
-
-    # ── Top 5 products by revenue / units sold ────────────────────
-    product_totals = {
-        row['product__name']: {'revenue': row['revenue'] or 0, 'units': row['units'] or 0}
-        for row in (
-            SaleItem.objects
-            .filter(sale__status='completed')
-            .values('product__name')
-            .annotate(revenue=Sum(Fexpr('quantity') * Fexpr('unit_price')), units=Sum('quantity'))
-        )
+    ctx = {
+        'tiles': tiles,
+        'selected': selected,
+        'selected_title': period.title,
+        'selected_dates': date_label(period.start, end),
+        'presets': PRESETS.items(),
+        'preset': preset,
+        'custom_from': custom[0].isoformat() if custom else custom_from,
+        'custom_to': custom[1].isoformat() if custom else custom_to,
+        'today': today,
+        'view': view,
+        'group': group,
     }
-    for name, row in archived['products'].items():
-        totals = product_totals.setdefault(name, {'revenue': 0, 'units': 0})
-        totals['revenue'] += row['revenue']
-        totals['units'] += row['units']
-
-    top_products = sorted(product_totals.items(), key=lambda kv: kv[1]['revenue'], reverse=True)[:5]
-    top_product_labels = [name for name, _ in top_products]
-    top_product_values = [float(t['revenue']) for _, t in top_products]
-
-    top_units = sorted(product_totals.items(), key=lambda kv: kv[1]['units'], reverse=True)[:5]
-    top_units_labels = [name for name, _ in top_units]
-    top_units_values = [t['units'] for _, t in top_units]
-
-    # ── Low stock products (stock <= 5) ───────────────────────────
-    from products.models import Product
-    low_stock = (
-        Product.objects
-        .filter(is_active=True, stock__lte=5)
-        .order_by('stock')
-    )
-
-    # ── Cashier performance (all time) ────────────────────────────
-    cashier_stats = (
-        Sale.objects
-        .filter(status='completed')
-        .values('cashier__username')
-        .annotate(
-            sales_count=Count('id'),
-            revenue=Sum(
-                SaleItem.objects.filter(sale=Fexpr('id'))
-                .values('sale')
-                .annotate(t=Sum(Fexpr('quantity') * Fexpr('unit_price')))
-                .values('t')[:1]
-            )
-        )
-    )
-
-    # Simpler cashier stats using Python
-    from django.contrib.auth.models import User
-    cashier_data = []
-    tenant_cashier_ids = (
-        Sale.objects
-        .filter(status='completed')  # TenantManager scopes this
-        .values_list('cashier_id', flat=True)
-        .distinct()
-    )
-    cashiers = User.objects.filter(pk__in=tenant_cashier_ids)
-    for cashier in cashiers:
-        sales = Sale.objects.filter(status='completed', cashier=cashier).prefetch_related('items')
-        rev = sum(s.total for s in sales)
-        cashier_data.append({
-            'username': cashier.username,
-            'sales_count': sales.count(),
-            'revenue': rev,
-        })
-    by_name = {c['username']: c for c in cashier_data}
-    for username, row in archived['cashiers'].items():
-        entry = by_name.get(username)
-        if entry is None:
-            entry = by_name[username] = {'username': username, 'sales_count': 0, 'revenue': 0}
-            cashier_data.append(entry)
-        entry['sales_count'] += row['sales_count']
-        entry['revenue'] += row['revenue']
-    cashier_data.sort(key=lambda x: x['revenue'], reverse=True)
-    max_cashier_revenue = cashier_data[0]['revenue'] if cashier_data else 1
-
-    # ── Sale status counts ────────────────────────────────────────
-    status_counts = {
-        'completed': Sale.objects.filter(status='completed').count() + archived['completed'],
-        'refunded':  Sale.objects.filter(status='refunded').count() + archived['refunded'],
-        'pending':   Sale.objects.filter(status='pending').count(),
-    }
-
-    # ── Refund rate ───────────────────────────────────────────────
-    total_sales_count = status_counts['completed'] + status_counts['refunded']
-    refund_rate = round(
-        (status_counts['refunded'] / total_sales_count * 100), 1
-    ) if total_sales_count else 0
-
-    # ── Low stock count ───────────────────────────────────────────
-    low_stock_count = low_stock.count()
-
-    # ── Server-rendered chart data (no JS chart library; works offline) ──
-    max_rev = max(chart_revenue) or 1
-    days = []
-    for i in range(7):
-        day = seven_days_ago + timedelta(days=i)
-        days.append({
-            'label':   day.strftime('%a'),
-            'date':    day.strftime('%b %d'),
-            'revenue': chart_revenue[i],
-            'txns':    chart_txns[i],
-            'pct':     round(chart_revenue[i] / max_rev * 100, 1),
-            'is_today': day == today,
-        })
-    yesterday_total = chart_revenue[5]
-    week_total = sum(chart_revenue)
-    week_txns = sum(chart_txns)
-    if yesterday_total:
-        today_delta_pct = round((float(total_today) - yesterday_total) / yesterday_total * 100)
+    if view == 'items':
+        ctx['lines'], ctx['line_total'] = order_items(period.start, end)
     else:
-        today_delta_pct = None
+        rows, products_unavailable = product_rows(period.start, end)
+        archive_unavailable = archive_unavailable or products_unavailable
+        ctx['rows'] = rows
+        ctx['groups'] = group_rows(rows) if group == 'category' else None
+        ctx['totals'] = {
+            'units': sum(r['units'] for r in rows),
+            'refund_units': sum(r['refund_units'] for r in rows),
+            'sales': sum((r['sales'] for r in rows), Decimal('0')),
+            'refund_cost': sum((r['refund_cost'] for r in rows), Decimal('0')),
+            'net': sum((r['net'] for r in rows), Decimal('0')),
+        }
+    ctx['archive_unavailable'] = archive_unavailable
+    preset_label = PRESETS.get(preset) or f"Custom range {date_label(*custom)}"
+    ctx.update(_print_context(
+        request, 'Tiles',
+        f"{preset_label} · table: {period.title}, {ctx['selected_dates']} · "
+        f"{'Order items' if view == 'items' else 'Products'}",
+    ))
 
-    max_top = top_product_values[0] if top_product_values else 1
-    top_products_rows = [
-        {'name': n, 'value': v, 'pct': round(v / max_top * 100, 1)}
-        for n, v in zip(top_product_labels, top_product_values)
+    # Links keep the period choice; a tile or view switch only changes its own part.
+    base = {'preset': preset}
+    if preset == 'custom':
+        base.update({'from': ctx['custom_from'], 'to': ctx['custom_to']})
+    from urllib.parse import urlencode
+    ctx['qs_tile'] = urlencode({**base, 'view': view, 'group': group})
+    ctx['qs_view'] = urlencode({**base, 'tile': selected, 'group': group})
+    ctx['qs_group'] = urlencode({**base, 'tile': selected, 'view': view})
+    return render(request, 'sales/dashboard.html', ctx)
+
+
+# ─── Dashboard: Chart tab ────────────────────────────────────
+@pos_login_required
+def charts(request):
+    """One measure over time, a summary beside it, and breakdowns of the period."""
+    from reports import charts as rc
+    from reports.pnl import fmt
+    from reports.tiles import date_label
+
+    today = timezone.localdate()
+    range_key = request.GET.get('range', rc.DEFAULT_RANGE)
+    custom = None
+    if range_key == 'custom':
+        custom = _custom_range(request, today)
+        if custom is None:
+            range_key = rc.DEFAULT_RANGE
+    elif range_key not in rc.RANGES:
+        range_key = rc.DEFAULT_RANGE
+    metric = request.GET.get('metric', rc.DEFAULT_METRIC)
+    if metric not in rc.METRICS:
+        metric = rc.DEFAULT_METRIC
+    metric_label, metric_kind = rc.METRICS[metric]
+
+    start, end, step = rc.range_dates(range_key, today, custom)
+    series = rc.time_series(start, end, step, metric, today)
+    parts = rc.breakdowns(start, end)
+
+    for b in series['buckets']:
+        b['text'] = fmt(b['value'], metric_kind)
+    for t in series['ticks']:
+        t['text'] = rc.tick_text(t['value'], metric_kind)
+
+    latest = next((b for b in reversed(series['buckets']) if b['is_current']), series['buckets'][-1])
+    summaries = [
+        {'key': 'latest', 'label': latest['full'], 'rows': rc.summary(latest['fig'])},
+        {'key': 'period', 'label': date_label(start, end),
+         'rows': rc.summary(series['total'])},
     ]
-    max_units = top_units_values[0] if top_units_values else 1
-    top_units_rows = [
-        {'name': n, 'value': v, 'pct': round(v / max_units * 100, 1)}
-        for n, v in zip(top_units_labels, top_units_values)
-    ]
-    status_total = sum(status_counts.values()) or 1
-    status_pct = {k: round(v / status_total * 100, 1) for k, v in status_counts.items()}
+    for sm in summaries:
+        for r in sm['rows']:
+            r['text'] = fmt(r['value'], r['kind'])
 
-    return render(request, 'sales/dashboard.html', {
-        # Today
-        'total_today':        total_today,
-        'avg_sale':           avg_sale,
-        'recent_sales':       recent_sales,
-        'sales_count_today':  len(todays_sales),
+    range_label = rc.RANGES.get(range_key) or f"Custom range {date_label(start, end)}, by {step}"
+    print_ctx = _print_context(request, 'Chart', f"{range_label} · chart: {metric_label}")
 
-        # Refund & stock summary
-        'refund_rate':        refund_rate,
-        'total_sales_count':  total_sales_count,
-        'low_stock_count':    low_stock_count,
-        'archive_unavailable': archive_unavailable,
-
-        # Charts (JSON for JS)
-        'chart_days':         json.dumps(chart_days),
-        'chart_revenue':      json.dumps(chart_revenue),
-        'chart_txns':         json.dumps(chart_txns),
-        'top_product_labels': json.dumps(top_product_labels),
-        'top_product_values': json.dumps(top_product_values),
-        'top_units_labels':   json.dumps(top_units_labels),
-        'top_units_values':   json.dumps(top_units_values),
-
-        # Server-rendered charts
-        'days':               days,
-        'yesterday_total':    yesterday_total,
-        'today_delta_pct':    today_delta_pct,
-        'today_delta_abs':    abs(today_delta_pct) if today_delta_pct is not None else None,
-        'week_total':         week_total,
-        'week_txns':          week_txns,
-        'top_products_rows':  top_products_rows,
-        'top_units_rows':     top_units_rows,
-        'status_pct':         status_pct,
-
-        # Tables/lists
-        'low_stock':          low_stock[:8],
-        'cashier_data':       cashier_data,
-        'max_cashier_revenue': max_cashier_revenue,
-        'status_counts':      status_counts,
+    base = {'range': range_key}
+    if custom:
+        base.update({'from': custom[0].isoformat(), 'to': custom[1].isoformat()})
+    from urllib.parse import urlencode
+    return render(request, 'sales/charts.html', {
+        'ranges': rc.RANGES.items(),
+        'range_key': range_key,
+        'custom_from': custom[0].isoformat() if custom else request.GET.get('from', ''),
+        'custom_to': custom[1].isoformat() if custom else request.GET.get('to', ''),
+        'today': today,
+        'metrics': [(k, v[0]) for k, v in rc.METRICS.items()],
+        'metric': metric,
+        'metric_label': metric_label,
+        'step': step,
+        'qs_metric': urlencode(base),
+        'series': series,
+        'summaries': summaries,
+        'payments': rc.bars(series['payments'])[0],
+        **{k: v for k, v in parts.items() if k != 'archive_unavailable'},
+        'archive_unavailable': series['archive_unavailable'] or parts['archive_unavailable'],
+        **print_ctx,
     })
+
+
+# ─── Dashboard: P&L tab ──────────────────────────────────────
+@feature_required('can_access_reports')
+def pnl(request):
+    import csv
+    from django.http import HttpResponse
+    from reports.pnl import DEFAULT_PERIOD, PERIODS, build_pnl, fmt
+
+    try:
+        months = int(request.GET.get('months', DEFAULT_PERIOD))
+    except ValueError:
+        months = DEFAULT_PERIOD
+    if months not in PERIODS:
+        months = DEFAULT_PERIOD
+
+    today = timezone.localdate()
+    table = build_pnl(today, months)
+    for row in table['rows']:
+        for r in (row, *row['children']):
+            r['cells'] = [fmt(v, r['kind']) for v in r['values']]
+            r['total_text'] = fmt(r['total'], r['kind'])
+
+    if request.GET.get('format') == 'csv':
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="pnl-{today:%Y-%m-%d}.csv"'
+        response.write('﻿')  # so Excel reads the peso sign
+        writer = csv.writer(response)
+        writer.writerow(['Parameter', *(c['label'] for c in table['columns']), 'Total'])
+        for row in table['rows']:
+            for r, prefix in ((row, ''), *((c, '  ') for c in row['children'])):
+                writer.writerow([prefix + r['label'], *r['cells'], r['total_text']])
+        return response
+
+    return render(request, 'sales/pnl.html', {
+        **table,
+        'months': months,
+        'periods': PERIODS,
+        **_print_context(request, 'P&L', f'Last {months} months, by month'),
+    })
+
 
 def _cashier_today(user):
     """Completed sales rung up by this cashier today: (count, total)."""
@@ -767,6 +754,11 @@ def sale_history(request):
     filtered_total = SaleItem.objects.filter(sale__in=completed).aggregate(
         t=Coalesce(Sum(F('quantity') * F('unit_price')), Value(Decimal('0')), output_field=DecimalField())
     )['t']
+    # Less money already handed back on sales that are only partly refunded.
+    from .models import RefundItem
+    filtered_total -= RefundItem.objects.filter(refund__sale__in=completed).aggregate(
+        t=Coalesce(Sum(F('quantity') * F('unit_price')), Value(Decimal('0')), output_field=DecimalField())
+    )['t']
     filtered_count = completed.count()
     refunded_count = sales.filter(status='refunded').count()
 
@@ -779,7 +771,7 @@ def sale_history(request):
     refunded_count += arch_refunded
 
     timeline = TimelineList(
-        sales.order_by('-created_at', '-pk').prefetch_related('items__product').select_related('customer', 'cashier'),
+        sales.order_by('-created_at', '-pk').prefetch_related('items__product', 'refunds__items').select_related('customer', 'cashier'),
         archived,
     )
     sales = Paginator(timeline, 25).get_page(request.GET.get('page'))
@@ -809,31 +801,94 @@ def sale_history(request):
 
 @manager_or_admin_required
 def refund_sale(request, pk):
-    sale = get_object_or_404(Sale, pk=pk)
+    """Refund some or all of a sale's items. Each line says how many to return
+    and whether they go back into stock; the sale turns 'refunded' once every
+    item has been returned. A sale can be refunded in parts, on different days."""
+    from .models import Refund, RefundItem
 
+    sale = get_object_or_404(Sale, pk=pk)
     if sale.status != 'completed':
-        # Pending sales never deducted stock; refunded ones already restored it.
+        # Pending sales were never paid; fully refunded ones have nothing left.
         messages.error(request, f'Sale {sale} is {sale.get_status_display().lower()} and cannot be refunded.')
         return redirect('sales:sale_history')
 
-    if request.method == 'POST':
-        with transaction.atomic():
-            # Conditional update: only one request can flip completed -> refunded,
-            # so stock is restored exactly once even on double-clicks or races.
-            claimed = Sale.objects.filter(pk=sale.pk, status='completed').update(
-                status='refunded', refunded_by=request.user, refunded_at=timezone.now(),
-            )
-            if claimed:
-                for item in SaleItem.objects.filter(sale_id=sale.pk):
-                    Product.objects.filter(pk=item.product_id).update(stock=F('stock') + item.quantity)
+    def lines_for(sale_id):
+        done = dict(
+            RefundItem.objects.filter(sale_item__sale_id=sale_id).order_by()
+            .values('sale_item_id').annotate(q=Sum('quantity')).values_list('sale_item_id', 'q')
+        )
+        return [
+            {'item': item, 'refunded': done.get(item.pk, 0), 'left': item.quantity - done.get(item.pk, 0)}
+            for item in SaleItem.objects.filter(sale_id=sale_id).select_related('product').order_by('pk')
+        ]
 
-        if not claimed:
-            messages.error(request, f'Sale {sale} was already refunded.')
-        else:
-            messages.success(request, f'Sale {sale} has been refunded and stock restored.')
+    if request.method == 'POST':
+        error = None
+        with transaction.atomic():
+            # Lock the sale so two refunds of it can't both use the same items.
+            locked = Sale.objects.select_for_update().filter(pk=sale.pk, status='completed').first()
+            if locked is None:
+                error = f'Sale {sale} was already fully refunded.'
+            else:
+                lines = lines_for(sale.pk)
+                picked = []
+                for line in lines:
+                    raw = request.POST.get(f'qty_{line["item"].pk}', '0').strip() or '0'
+                    try:
+                        qty = int(raw)
+                    except ValueError:
+                        qty = -1
+                    if qty < 0 or qty > line['left']:
+                        error = (f'{line["item"].product.name}: enter 0 to {line["left"]} '
+                                 f'(only {line["left"]} left to refund).')
+                        break
+                    if qty:
+                        picked.append((line, qty, request.POST.get(f'restock_{line["item"].pk}') == 'on'))
+                if not error and not picked:
+                    error = 'Enter how many of at least one item to refund.'
+
+                if not error:
+                    now = timezone.now()
+                    refund = Refund.objects.create(sale=locked, refunded_by=request.user, refunded_at=now)
+                    RefundItem.objects.bulk_create([
+                        RefundItem(tenant_id=locked.tenant_id, refund=refund, sale_item=line['item'],
+                                   quantity=qty, unit_price=line['item'].unit_price, restocked=restock)
+                        for line, qty, restock in picked
+                    ])
+                    for line, qty, restock in picked:
+                        if restock:
+                            Product.objects.filter(pk=line['item'].product_id).update(stock=F('stock') + qty)
+                    picked_qty = {line['item'].pk: qty for line, qty, _ in picked}
+                    all_back = all(line['left'] == picked_qty.get(line['item'].pk, 0) for line in lines)
+                    if all_back:
+                        Sale.objects.filter(pk=locked.pk).update(
+                            status='refunded', refunded_by=request.user, refunded_at=now,
+                        )
+                    amount = sum((line['item'].unit_price * qty for line, qty, _ in picked), Decimal('0'))
+                    units = sum(qty for _, qty, _ in picked)
+                    restocked = sum(qty for _, qty, r in picked if r)
+
+        if error:
+            messages.error(request, error)
+            return redirect('sales:refund_sale', pk=sale.pk)
+        stock_note = ('all returned to stock' if restocked == units
+                      else 'none returned to stock' if not restocked
+                      else f'{restocked} returned to stock')
+        messages.success(
+            request,
+            f'Refunded ₱{amount:,.2f} for {units} item{"s" if units != 1 else ""} '
+            f'on {sale} ({stock_note}).{" The sale is now fully refunded." if all_back else ""}',
+        )
         return redirect('sales:sale_history')
 
-    return render(request, 'sales/refund_confirm.html', {'sale': sale})
+    lines = lines_for(sale.pk)
+    refunds = sale.refunds.select_related('refunded_by').prefetch_related('items__sale_item__product')
+    return render(request, 'sales/refund_confirm.html', {
+        'sale': sale,
+        'lines': lines,
+        'refunds': refunds,
+        'left_total': sum((l['item'].unit_price * l['left'] for l in lines), Decimal('0')),
+    })
 
 
 # ─── Receipt ─────────────────────────────────────────────

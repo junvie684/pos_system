@@ -13,6 +13,7 @@ from sales.models import Sale, SaleItem
 from tenants.middleware import tenant_context
 from tenants.models import Tenant
 from tenants.test_utils import (
+    make_refund,
     PASSWORD, make_platform_admin, make_product, make_sale, make_tenant, make_user, pos_login,
 )
 
@@ -61,6 +62,23 @@ class ArchiverTests(TestCase):
         sale = self.old_sale(status='refunded')
         archive_store(self.store)
         self.assertEqual(ArchivedSale.all_objects.get(pk=sale.pk).status, 'refunded')
+
+    def test_part_refunds_move_with_their_sale(self):
+        from archive.models import ArchivedRefund
+        from sales.models import Refund, RefundItem
+        sale = self.old_sale()                       # 2 x the product
+        make_refund(sale, qty=1, restocked=False)    # one of the two came back, damaged
+        archive_store(self.store)
+        self.assertFalse(Refund.all_objects.exists())
+        self.assertFalse(RefundItem.all_objects.exists())
+        with tenant_context(self.store.id):
+            copy = ArchivedRefund.objects.get(sale_id=sale.pk)
+            line = copy.items.get()
+            self.assertEqual((copy.total, line.quantity, line.restocked, line.product_name),
+                             (self.product.price, 1, False, self.product.name))
+            archived = ArchivedSale.objects.get(pk=sale.pk)
+            self.assertEqual(archived.status, 'completed')
+            self.assertEqual(archived.kept_total, self.product.price)
 
     def test_rerun_replaces_a_leftover_copy(self):
         sale = self.old_sale()
@@ -371,7 +389,7 @@ class AnalyticsArchiveTests(TestCase):
 
 
 class DashboardArchiveTests(TestCase):
-    """The dashboard's all-time panels count archived sales too."""
+    """The dashboard tiles and product table count archived sales too."""
     databases = BOTH_DBS
 
     def setUp(self):
@@ -386,17 +404,23 @@ class DashboardArchiveTests(TestCase):
         archive_store(self.store)
         make_sale(self.store, self.cashier, pandesal, qty=1)   # still in the main database
         pos_login(self.client, self.manager)
+        today = timezone.localdate()
+        self.span = {'preset': 'custom', 'from': (today - timedelta(days=500)).isoformat(),
+                     'to': today.isoformat()}
 
-    def test_all_time_panels_include_archived_sales(self):
-        ctx = self.client.get('/').context
+    def test_tiles_and_products_include_archived_sales(self):
+        ctx = self.client.get('/', self.span).context
         self.assertEqual(ArchivedSale.all_objects.count(), 2)
-        self.assertEqual(ctx['top_products_rows'][0]['name'], 'Pandesal')
-        self.assertEqual(ctx['top_products_rows'][0]['value'], 135.0)
-        self.assertEqual(ctx['top_units_rows'][0]['value'], 3)
-        till = next(c for c in ctx['cashier_data'] if c['username'] == 'till1')
-        self.assertEqual((till['sales_count'], till['revenue']), (2, Decimal('135.00')))
-        self.assertEqual((ctx['status_counts']['completed'], ctx['status_counts']['refunded']), (2, 1))
+        tile = ctx['tiles'][0]
+        self.assertEqual((tile['sales'], tile['txns'], tile['units']), (Decimal('180.00'), 3, 4))
+        pandesal = ctx['rows'][0]
+        self.assertEqual((pandesal['name'], pandesal['units'], pandesal['sales']),
+                         ('Pandesal', 4, Decimal('180.00')))
         self.assertFalse(ctx['archive_unavailable'])
+
+    def test_order_items_include_archived_lines(self):
+        ctx = self.client.get('/', {**self.span, 'view': 'items'}).context
+        self.assertEqual(ctx['line_total'], 3)
 
     def test_sale_caught_mid_move_is_counted_once(self):
         # Simulate a run that copied a sale but stopped before deleting it.
@@ -404,14 +428,14 @@ class DashboardArchiveTests(TestCase):
         live = make_sale(self.store, self.cashier, make_product(self.store, name='Kape', price='30.00'))
         ArchivedSale.all_objects.filter(pk=archived.pk).update(id=live.pk)
         ArchivedSaleItem.all_objects.filter(sale_id=archived.pk).update(sale_id=live.pk)
-        ctx = self.client.get('/').context
-        self.assertEqual(ctx['status_counts']['completed'], 2)
+        ctx = self.client.get('/', self.span).context
+        self.assertEqual(ctx['tiles'][0]['txns'], 3)   # live sale, its archived copy skipped, + refunded
 
     def test_dashboard_still_renders_when_archive_is_down(self):
         from unittest import mock
         from django.db import DatabaseError
-        with mock.patch('archive.history.ArchivedSale.objects.filter', side_effect=DatabaseError):
-            resp = self.client.get('/')
+        with mock.patch('reports.pnl.archived_sales_made', side_effect=DatabaseError),              mock.patch('reports.tiles.archived_sales_made', side_effect=DatabaseError):
+            resp = self.client.get('/', self.span)
         self.assertTrue(resp.context['archive_unavailable'])
         self.assertContains(resp, "archive database isn't reachable")
-        self.assertEqual(resp.context['status_counts']['completed'], 1)
+        self.assertEqual(resp.context['tiles'][0]['txns'], 1)

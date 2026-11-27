@@ -81,6 +81,16 @@
 
   <div class="rule-total"></div>
   <div class="row total"><span>TOTAL</span><span class="fig">₱{{ sale.total|floatformat:"2g" }}</span></div>
+  {% with refunds=sale.refunds.all %}{% if refunds %}
+  <div class="rule"></div>
+  <div class="refunds">
+    {% for r in refunds %}
+    <div class="row item-name"><span>Refund <span class="fig">{{ r.refunded_at|date:"Y-m-d H:i" }}</span></span><span class="fig">−₱{{ r.total|floatformat:"2g" }}</span></div>
+    {% for i in r.items.all %}<div class="item-sub fig">{{ i.quantity }} × {{ i.product_name }}{% if not i.restocked %} (not restocked){% endif %}</div>{% endfor %}
+    {% endfor %}
+    <div class="row change"><span>Kept after refunds</span><span class="fig">₱{{ sale.kept_total|floatformat:"2g" }}</span></div>
+  </div>
+  {% endif %}{% endwith %}
 
   <div class="rule"></div>
   <div class="tax">

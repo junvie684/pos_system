@@ -1,0 +1,25 @@
+{# Tab bar for the Dashboard: Tiles · Chart · P&L #}
+{% with url_name=request.resolver_match.url_name %}
+<nav class="dash-tabs" aria-label="Dashboard views">
+  <a href="{% url 'sales:dashboard' %}" class="dash-tab{% if url_name == 'dashboard' %} is-on{% endif %}"{% if url_name == 'dashboard' %} aria-current="page"{% endif %}>
+    <i class="bi bi-grid" aria-hidden="true"></i>Tiles
+  </a>
+  <a href="{% url 'sales:charts' %}" class="dash-tab{% if url_name == 'charts' %} is-on{% endif %}"{% if url_name == 'charts' %} aria-current="page"{% endif %}>
+    <i class="bi bi-graph-up" aria-hidden="true"></i>Chart
+  </a>
+  {% if user.profile.can_access_reports %}
+  <a href="{% url 'sales:pnl' %}" class="dash-tab{% if url_name == 'pnl' %} is-on{% endif %}"{% if url_name == 'pnl' %} aria-current="page"{% endif %}>
+    <i class="bi bi-list-columns" aria-hidden="true"></i>P&amp;L
+  </a>
+  {% endif %}
+</nav>
+{% endwith %}
+<style>
+  .dash-tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--rule); overflow-x: auto; scrollbar-width: none; }
+  .dash-tabs::-webkit-scrollbar { display: none; }
+  .dash-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 14px; margin-bottom: -1px; border-bottom: 3px solid transparent; color: var(--ink-2); font-size: 14.5px; font-weight: 600; text-decoration: none; white-space: nowrap; transition: color .12s, border-color .12s, background-color .12s; }
+  .dash-tab i { font-size: 15px; color: var(--ink-3); }
+  .dash-tab:hover { color: var(--ink); background: var(--paper-2); }
+  .dash-tab.is-on { color: var(--ink); font-weight: 700; border-bottom-color: var(--ink); }
+  .dash-tab.is-on i { color: var(--ink); }
+</style>

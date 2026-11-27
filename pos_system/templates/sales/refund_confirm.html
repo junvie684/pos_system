@@ -3,43 +3,188 @@
 {% block page_title %}Refund Sale{% endblock %}
 {% block content %}
 <main class="confirm-wrap" data-cashier-screen="refund-confirmation">
-  <form method="post" class="card confirm-card" aria-labelledby="refund-title" aria-describedby="refund-warning">
+  <form method="post" class="card confirm-card" aria-labelledby="refund-title" aria-describedby="refund-warning" id="refund-form">
     {% csrf_token %}
-    <span class="confirm-kicker"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Stock restoration</span>
+    <span class="confirm-kicker"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Refund by item</span>
     <h1 id="refund-title">Refund <span class="serial">{{ sale.or_display|default:sale.pk }}</span></h1>
-    <p class="meta"><span class="fig">{{ sale.created_at|date:"M d, Y H:i" }}</span> · {{ sale.cashier }} · {{ sale.get_payment_method_display }}{% if sale.customer %} · {{ sale.customer }}{% endif %}</p>
+    <p class="meta"><span class="fig">{{ sale.created_at|date:"M d, Y H:i" }}</span> · {{ sale.cashier_display }} · {{ sale.get_payment_method_display }}{% if sale.customer %} · {{ sale.customer }}{% endif %}</p>
 
-    <p class="list-label">These items go back into stock</p>
-    <div class="lines">
-      {% for item in sale.items.all %}
-      <div class="line"><span>{{ item.product.name }}</span><span class="fig">×{{ item.quantity }}&nbsp;&nbsp;₱{{ item.subtotal|floatformat:"2g" }}</span></div>
-      {% endfor %}
+    <div class="rf-head">
+      <p class="list-label">How many of each item is coming back?</p>
+      <button type="button" class="btn btn-ghost btn-sm" id="rf-all"><i class="bi bi-check2-all" aria-hidden="true"></i> Refund everything left</button>
     </div>
-    <div class="total"><span>Refund total</span><span class="fig">₱{{ sale.total|floatformat:"2g" }}</span></div>
 
-    <p class="danger-note" id="refund-warning"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> The sale is marked refunded today and its stock restored. This can't be undone.</p>
+    <table class="rf-table">
+      <thead>
+        <tr>
+          <th scope="col">Item</th>
+          <th scope="col" class="num">Refund qty</th>
+          <th scope="col" class="num">Amount</th>
+          <th scope="col" class="rf-stock-h">Back to stock</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in lines %}
+        <tr class="{% if not line.left %}is-done{% endif %}">
+          <th scope="row">
+            <span class="rf-name">{{ line.item.product.name }}</span>
+            <span class="rf-sub fig">{{ line.item.quantity }} × ₱{{ line.item.unit_price|floatformat:"2g" }}{% if line.refunded %} · <span class="rf-was">{{ line.refunded }} already refunded</span>{% endif %}</span>
+          </th>
+          <td class="num">
+            {% if line.left %}
+            <div class="rf-step">
+              <button type="button" class="rf-btn" data-step="-1" aria-label="One fewer {{ line.item.product.name }}"><i class="bi bi-dash" aria-hidden="true"></i></button>
+              <input type="number" name="qty_{{ line.item.pk }}" id="qty_{{ line.item.pk }}" value="0" min="0" max="{{ line.left }}" step="1" inputmode="numeric"
+                     data-price="{{ line.item.unit_price }}" aria-label="Quantity of {{ line.item.product.name }} to refund, up to {{ line.left }}">
+              <button type="button" class="rf-btn" data-step="1" aria-label="One more {{ line.item.product.name }}"><i class="bi bi-plus" aria-hidden="true"></i></button>
+            </div>
+            <span class="rf-max fig">of {{ line.left }}</span>
+            {% else %}<span class="rf-done">All refunded</span>{% endif %}
+          </td>
+          <td class="num fig rf-amt" data-for="qty_{{ line.item.pk }}">{% if line.left %}₱0.00{% else %}—{% endif %}</td>
+          <td class="rf-stock">
+            {% if line.left %}
+            <label class="rf-check"><input type="checkbox" name="restock_{{ line.item.pk }}" checked> <span>Restock</span></label>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="total"><span>Refund total</span><span class="fig" id="rf-total" aria-live="polite">₱0.00</span></div>
+    <p class="rf-left">₱{{ left_total|floatformat:"2g" }} of this sale can still be refunded. Untick <b>Restock</b> for damaged or opened items: the money is refunded but they don't go back into stock.</p>
+
+    <p class="danger-note" id="refund-warning"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> The refund is recorded today and can't be undone. The sale becomes "Refunded" once every item is back.</p>
     <div class="confirm-actions">
       <a href="{% url 'sales:sale_history' %}" class="btn btn-ghost">Cancel</a>
-      <button type="submit" class="btn btn-danger"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Refund sale</button>
+      <button type="submit" class="btn btn-danger" id="rf-go" disabled><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> <span id="rf-go-text">Pick items to refund</span></button>
     </div>
+
+    {% if refunds %}
+    <div class="rf-history">
+      <p class="list-label">Earlier refunds on this sale</p>
+      <ul>
+        {% for r in refunds %}
+        <li>
+          <span class="fig">{{ r.refunded_at|date:"M d, Y H:i" }}</span> · {{ r.given_by|default:"—" }}
+          <span class="rf-hist-items">{% for i in r.items.all %}{{ i.sale_item.product.name }} ×{{ i.quantity }}{% if not i.restocked %} (not restocked){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+          <b class="fig">− ₱{{ r.total|floatformat:"2g" }}</b>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
   </form>
 </main>
 <style>
-.confirm-wrap { display: flex; justify-content: center; padding-top: 4vh; }
-.confirm-card { width: 100%; max-width: 520px; }
+.confirm-wrap { display: flex; justify-content: center; padding-top: 3vh; }
+.confirm-card { width: 100%; max-width: 640px; }
 .confirm-kicker { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--red-ink); font-size: 11.5px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; }
 .confirm-card h1 { font-size: 20px; font-weight: 800; }
 .serial { font-family: var(--font-fig); color: var(--red); letter-spacing: .5px; }
 .meta { font-size: 14px; color: var(--ink-2); margin-top: 4px; }
 .meta .fig { font-size: 13px; }
-.list-label { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-top: 18px; }
-.lines { margin-top: 6px; border-top: 1px solid var(--rule); }
-.line { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--rule-strong); font-size: 14px; }
-.line .fig { color: var(--ink-2); white-space: nowrap; }
-.total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 8px; border-top: 2px solid var(--ink); font-weight: 700; }
+.rf-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 18px; }
+.list-label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+
+.rf-table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 14px; }
+.rf-table thead th { padding: 6px 8px; font-size: 11.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--rule); text-align: left; }
+.rf-table tbody th, .rf-table td { padding: 10px 8px; border-bottom: 1px dashed var(--rule-strong); vertical-align: middle; text-align: left; font-weight: 400; }
+.rf-table .num { text-align: right; }
+.rf-name { display: block; font-weight: 600; color: var(--ink); }
+.rf-sub { display: block; font-size: 12.5px; color: var(--ink-3); }
+.rf-was { color: var(--red-ink); }
+.is-done .rf-name { color: var(--ink-3); text-decoration: line-through; }
+.rf-done { font-size: 13px; color: var(--ink-3); }
+.rf-step { display: inline-flex; align-items: center; border: 1px solid var(--rule-strong); background: var(--panel); }
+.rf-btn { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: none; color: var(--ink-2); font-size: 16px; cursor: pointer; }
+.rf-btn:hover { background: var(--paper-2); color: var(--ink); }
+.rf-btn:focus-visible, .rf-step input:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.rf-step input { width: 52px; height: 36px; border: 0; border-left: 1px solid var(--rule); border-right: 1px solid var(--rule); text-align: center; font: 700 15px var(--font-fig); color: var(--ink); -moz-appearance: textfield; }
+.rf-step input::-webkit-outer-spin-button, .rf-step input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rf-step input:invalid { background: var(--red-tint); color: var(--red-ink); }
+.rf-max { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-3); }
+.rf-amt { white-space: nowrap; color: var(--ink-2); }
+.rf-amt.is-on { color: var(--red-ink); font-weight: 700; }
+.rf-stock-h { width: 1%; white-space: nowrap; }
+.rf-check { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; font-size: 13.5px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.rf-check input { width: 18px; height: 18px; accent-color: var(--ink); }
+
+.total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; padding-top: 8px; border-top: 2px solid var(--ink); font-weight: 700; }
 .total .fig { font-size: 22px; letter-spacing: -.5px; }
+.rf-left { margin-top: 6px; font-size: 13px; color: var(--ink-3); }
 .danger-note { display: flex; gap: 8px; align-items: center; margin: 16px 0; padding: 10px 12px; border-radius: var(--radius); background: var(--red-tint); color: var(--red-ink-deep); font-size: 13.5px; font-weight: 600; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
-@media (max-width: 600px) { .confirm-actions .btn { flex: 1; } }
+.confirm-actions .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.rf-history { margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.rf-history ul { list-style: none; margin-top: 6px; }
+.rf-history li { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px; color: var(--ink-2); }
+.rf-history li:last-child { border-bottom: 0; }
+.rf-hist-items { grid-column: 1 / 3; grid-row: 2; font-size: 13px; color: var(--ink-3); }
+.rf-history b { grid-row: 1 / 3; grid-column: 3; align-self: center; color: var(--red-ink); }
+
+@media (max-width: 600px) {
+  .rf-head { flex-direction: column; align-items: stretch; }
+  .rf-table thead { display: none; }
+  .rf-table, .rf-table tbody { display: block; }
+  .rf-table tr { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; padding: 10px 0; border-bottom: 1px dashed var(--rule-strong); }
+  .rf-table tbody th, .rf-table td { display: block; padding: 0; border: 0; }
+  .rf-table tbody th { grid-column: 1 / -1; }
+  .rf-table .rf-amt { align-self: center; }
+  .rf-table .rf-stock { grid-column: 1 / -1; }
+  .confirm-actions .btn { flex: 1; }
+}
 </style>
+<script>
+(function () {
+  const inputs = [...document.querySelectorAll('.rf-step input')];
+  const total = document.getElementById('rf-total');
+  const go = document.getElementById('rf-go');
+  const goText = document.getElementById('rf-go-text');
+  const peso = n => '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  function clamp(input) {
+    const max = +input.max;
+    let v = parseInt(input.value, 10);
+    if (isNaN(v) || v < 0) v = 0;
+    if (v > max) v = max;
+    return v;
+  }
+  function update() {
+    let sum = 0, count = 0, valid = true;
+    inputs.forEach(function (input) {
+      const v = parseInt(input.value, 10);
+      if (input.value !== '' && (isNaN(v) || v < 0 || v > +input.max)) valid = false;
+      const q = clamp(input);
+      const amt = q * parseFloat(input.dataset.price);
+      const cell = document.querySelector('.rf-amt[data-for="' + input.id + '"]');
+      cell.textContent = peso(amt);
+      cell.classList.toggle('is-on', q > 0);
+      sum += amt; count += q;
+    });
+    total.textContent = peso(sum);
+    go.disabled = !valid || count === 0;
+    goText.textContent = count ? 'Refund ' + peso(sum) : 'Pick items to refund';
+  }
+  document.querySelectorAll('.rf-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const input = btn.parentElement.querySelector('input');
+      input.value = Math.min(+input.max, Math.max(0, clamp(input) + (+btn.dataset.step)));
+      update();
+    });
+  });
+  inputs.forEach(i => i.addEventListener('input', update));
+  inputs.forEach(i => i.addEventListener('blur', function () { i.value = clamp(i); update(); }));
+  document.getElementById('rf-all').addEventListener('click', function () {
+    inputs.forEach(i => { i.value = i.max; });
+    update();
+  });
+  document.getElementById('refund-form').addEventListener('submit', function () {
+    go.disabled = true;   // no double refunds from a double click
+  });
+  update();
+})();
+</script>
 {% endblock %}

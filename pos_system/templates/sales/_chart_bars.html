@@ -1,0 +1,17 @@
+{# Ranked horizontal bars: rows = [{label, value, pct, share[, orders]}] #}
+{% if rows %}
+<ol class="hb">
+  {% for r in rows %}
+  <li>
+    {% if rank %}<span class="hb-rank fig">{{ forloop.counter }}</span>{% endif %}
+    <span class="hb-body">
+      <span class="hb-row">
+        <span class="hb-name" title="{{ r.label }}">{{ r.label }}{% if orders %} <span class="hb-sub fig">· {{ r.orders }} order{{ r.orders|pluralize }}</span>{% endif %}</span>
+        <span class="hb-val fig">₱{{ r.value|floatformat:"2g" }}{% if r.share is not None %} <span class="hb-sub">{{ r.share|floatformat:1 }}%</span>{% endif %}</span>
+      </span>
+      <span class="hb-bar" aria-hidden="true"><span style="width: {{ r.pct }}%"></span></span>
+    </span>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}<p class="ch-empty">{{ empty }}</p>{% endif %}

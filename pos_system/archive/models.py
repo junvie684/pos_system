@@ -88,6 +88,20 @@ class ArchivedSale(TenantModel):
     def refunded_by(self):
         return _name(self.refunded_by_name)
 
+    @property
+    def refunded_amount(self):
+        """Money handed back (prefetch 'refunds' when listing)."""
+        return sum((r.total for r in self.refunds.all()), start=Decimal('0.00'))
+
+    @property
+    def is_partly_refunded(self):
+        return self.status == 'completed' and bool(self.refunded_amount)
+
+    @property
+    def kept_total(self):
+        """What the customer paid, less everything refunded."""
+        return self.total - self.refunded_amount
+
     def __str__(self):
         return self.or_display or f"Archived sale #{self.pk}"
 
@@ -103,6 +117,64 @@ class ArchivedSaleItem(TenantModel):
     @property
     def product(self):
         return _name(self.product_name)
+
+    @property
+    def subtotal(self):
+        return self.quantity * self.unit_price
+
+
+class ArchivedRefund(TenantModel):
+    """Frozen copy of a sales.Refund, moved with its sale."""
+    sale             = models.ForeignKey(ArchivedSale, related_name='refunds', on_delete=models.CASCADE)
+    refunded_at      = models.DateTimeField(db_index=True)
+    refunded_by_name = models.CharField(max_length=150, blank=True)
+    total            = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+
+    class Meta:
+        ordering = ['refunded_at', 'pk']
+
+    # ── Same shape as sales.Refund for report tables ──
+    is_archived = True
+
+    @property
+    def refund_time(self):
+        return self.refunded_at
+
+    @property
+    def or_display(self):
+        return self.sale.or_display
+
+    @property
+    def sale_id_display(self):
+        return self.sale_id
+
+    @property
+    def sale_created_at(self):
+        return self.sale.created_at
+
+    @property
+    def customer(self):
+        return self.sale.customer
+
+    @property
+    def given_by(self):
+        return _name(self.refunded_by_name) or self.sale.cashier
+
+    def get_payment_method_display(self):
+        return self.sale.get_payment_method_display()
+
+    @property
+    def items_text(self):
+        return ', '.join(f'{i.product_name} ×{i.quantity}' for i in self.items.all())
+
+
+class ArchivedRefundItem(TenantModel):
+    refund       = models.ForeignKey(ArchivedRefund, related_name='items', on_delete=models.CASCADE)
+    product_id   = models.BigIntegerField(null=True, blank=True)
+    product_name = models.CharField(max_length=255)
+    quantity     = models.PositiveIntegerField()
+    unit_price   = models.DecimalField(max_digits=10, decimal_places=2)
+    restocked    = models.BooleanField(default=True)
 
     @property
     def subtotal(self):

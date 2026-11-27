@@ -4,6 +4,8 @@ from . import views
 app_name = 'sales'
 urlpatterns = [
     path('',                    views.dashboard,       name='dashboard'),
+    path('charts/',             views.charts,          name='charts'),
+    path('pnl/',                views.pnl,             name='pnl'),
     path('new/',                views.create_sale,     name='create_sale'),
     path('history/',            views.sale_history,    name='sale_history'),
     path('pending/',             views.pending_sales,   name='pending_sales'),

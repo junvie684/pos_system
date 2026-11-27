@@ -1,0 +1,282 @@
+{% extends 'base.html' %}
+{% block title %}Chart — Dashboard — POS{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block topbar_actions %}
+<button type="button" class="btn btn-ghost" onclick="exportPdf()"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i> <span class="btn-text">Export PDF</span></button>
+<a href="{% url 'sales:create_sale' %}" class="btn btn-primary"><i class="bi bi-plus-lg" aria-hidden="true"></i> New sale</a>
+{% endblock %}
+
+{% block content %}
+{% include 'partials/dashboard_tabs.html' %}
+{% include 'partials/dashboard_print.html' %}
+{% if archive_unavailable %}
+<div class="alert alert-warning" role="status">
+  <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+  <span>The archive database isn't reachable, so archived sales are missing from these charts.</span>
+</div>
+{% endif %}
+
+{# ── Toolbar: measure + period ───────────────────────────── #}
+<div class="ch-bar">
+  <div class="ch-seg" role="group" aria-label="Measure">
+    {% for key, label in metrics %}
+    <a href="?{{ qs_metric }}&amp;metric={{ key }}"{% if key == metric %} class="is-on" aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </div>
+  <details class="tl-period">
+    <summary><i class="bi bi-calendar3" aria-hidden="true"></i> {% for key, label in ranges %}{% if key == range_key %}{{ label }}{% endif %}{% endfor %}{% if range_key == 'custom' %}Custom range, by {{ step }}{% endif %} <i class="bi bi-chevron-down tl-caret" aria-hidden="true"></i></summary>
+    <div class="tl-menu">
+      <ul>
+        {% for key, label in ranges %}
+        <li><a href="?range={{ key }}&amp;metric={{ metric }}"{% if key == range_key %} class="is-on" aria-current="true"{% endif %}>{% if key == range_key %}<i class="bi bi-check2" aria-hidden="true"></i>{% endif %}{{ label }}</a></li>
+        {% endfor %}
+      </ul>
+      <form class="tl-custom{% if range_key == 'custom' %} is-on{% endif %}" method="get">
+        <input type="hidden" name="range" value="custom">
+        <input type="hidden" name="metric" value="{{ metric }}">
+        <p class="tl-menu-h">{% if range_key == 'custom' %}<i class="bi bi-check2" aria-hidden="true"></i> {% endif %}Custom range</p>
+        <div class="tl-custom-row">
+          <label><span class="sr-only">From</span><input type="date" name="from" value="{{ custom_from }}" max="{{ today|date:'Y-m-d' }}" required></label>
+          <span aria-hidden="true">–</span>
+          <label><span class="sr-only">To</span><input type="date" name="to" value="{{ custom_to }}" max="{{ today|date:'Y-m-d' }}" required></label>
+          <button type="submit" class="btn btn-sm">Apply</button>
+        </div>
+        <p class="tl-hint">Up to 2 months shows days, up to 6 months weeks, longer months.</p>
+      </form>
+    </div>
+  </details>
+</div>
+
+{# ── Main chart + summary ────────────────────────────────── #}
+<div class="ch-main">
+  <section class="card ch-card" aria-labelledby="ts-h">
+    <div class="ch-head">
+      <h2 id="ts-h">{{ metric_label }} by {{ step }}</h2>
+      <span class="ch-hint ts-hint">Hover a column for its figure{% if step != 'day' %} · the last column is so far{% endif %}</span>
+    </div>
+    <figure class="ts" aria-label="{{ metric_label }} by {{ step }}">
+      <div class="ts-axis" aria-hidden="true">
+        {% for t in series.ticks %}<span class="fig" style="bottom: {{ t.pct }}%">{{ t.text }}</span>{% endfor %}
+      </div>
+      <div class="ts-plot">
+        <div class="ts-grid" aria-hidden="true">{% for t in series.ticks %}<span style="bottom: {{ t.pct }}%"></span>{% endfor %}</div>
+        <div class="ts-cols{% if series.buckets|length > 20 %} is-dense{% endif %}" role="list" style="--n: {{ series.buckets|length }}">
+          {% for b in series.buckets %}
+          <div class="ts-col{% if b.is_current %} is-current{% endif %}" role="listitem" tabindex="0" aria-label="{{ b.full }}: {{ b.text }}{% if b.is_current %} so far{% endif %}">
+            <span class="ts-bar" style="height: {{ b.pct }}%"></span>
+            <span class="ts-tip" aria-hidden="true"><b>{{ b.full }}</b><span class="fig">{{ b.text }}</span>{% if b.is_current %}<span>so far</span>{% endif %}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="ts-labels{% if series.buckets|length > 20 %} is-dense{% endif %}" aria-hidden="true" style="--n: {{ series.buckets|length }}">
+          {% for b in series.buckets %}<span><b>{{ b.label }}</b>{% if b.sub %}<i>{{ b.sub }}</i>{% endif %}</span>{% endfor %}
+        </div>
+      </div>
+    </figure>
+    <details class="ch-table">
+      <summary>Show as table</summary>
+      <table>
+        <thead><tr><th scope="col">Period</th><th scope="col" class="num">{{ metric_label }}</th></tr></thead>
+        <tbody>{% for b in series.buckets %}<tr><td>{{ b.full }}</td><td class="num fig">{{ b.text }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </details>
+  </section>
+
+  <section class="card ch-sum" aria-label="Summary">
+    <div class="ch-sum-tabs" role="tablist">
+      {% for sm in summaries %}
+      <button type="button" role="tab" id="sum-t-{{ sm.key }}" aria-controls="sum-{{ sm.key }}" aria-selected="{% if forloop.last %}true{% else %}false{% endif %}" tabindex="{% if forloop.last %}0{% else %}-1{% endif %}">{{ sm.label }}</button>
+      {% endfor %}
+    </div>
+    {% for sm in summaries %}
+    <dl class="ch-sum-list" data-print-label="{{ sm.label }}" id="sum-{{ sm.key }}" role="tabpanel" aria-labelledby="sum-t-{{ sm.key }}"{% if not forloop.last %} hidden{% endif %}>
+      {% for r in sm.rows %}<div{% if r.strong %} class="is-strong"{% endif %}><dt>{{ r.label }}</dt><dd class="fig">{{ r.text }}</dd></div>{% endfor %}
+    </dl>
+    {% endfor %}
+  </section>
+</div>
+
+{# ── Breakdowns of the period ─────────────────────────────── #}
+<div class="ch-grid">
+  <section class="card ch-card" aria-labelledby="pay-h">
+    <div class="ch-head"><h2 id="pay-h">Sales by payment method</h2><span class="ch-hint">share of sales</span></div>
+    {% include 'sales/_chart_bars.html' with rows=payments empty="No sales in this period." %}
+  </section>
+
+  <section class="card ch-card" aria-labelledby="cat-h">
+    <div class="ch-head"><h2 id="cat-h">Sales by category</h2><span class="ch-hint">share of sales</span></div>
+    {% include 'sales/_chart_bars.html' with rows=categories empty="No sales in this period." %}
+  </section>
+
+  <section class="card ch-card" aria-labelledby="top-h">
+    <div class="ch-head"><h2 id="top-h">Top 10 products</h2><span class="ch-hint">by sales</span></div>
+    {% include 'sales/_chart_bars.html' with rows=top_products empty="No sales in this period." rank=True %}
+  </section>
+
+  <section class="card ch-card" aria-labelledby="hour-h">
+    <div class="ch-head"><h2 id="hour-h">Sales by hour of day</h2><span class="ch-hint">busiest hours stand tallest</span></div>
+    {% include 'sales/_chart_columns.html' with rows=hours empty="No sales in this period." %}
+  </section>
+
+  <section class="card ch-card" aria-labelledby="day-h">
+    <div class="ch-head"><h2 id="day-h">Sales by day of week</h2><span class="ch-hint">whole period</span></div>
+    {% if payments %}{% include 'sales/_chart_columns.html' with rows=weekdays %}{% else %}<p class="ch-empty">No sales in this period.</p>{% endif %}
+  </section>
+
+  <section class="card ch-card" aria-labelledby="cash-h">
+    <div class="ch-head"><h2 id="cash-h">Sales by cashier</h2><span class="ch-hint">with order count</span></div>
+    {% include 'sales/_chart_bars.html' with rows=cashiers empty="No sales in this period." orders=True %}
+  </section>
+</div>
+
+<style>
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+
+/* ── Toolbar ── */
+.ch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ch-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule-strong); background: var(--panel); }
+.ch-seg a { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); text-decoration: none; transition: background-color .12s, color .12s; }
+.ch-seg a + a { border-left: 1px solid var(--rule); }
+.ch-seg a:hover { background: var(--paper-2); color: var(--ink); }
+.ch-seg a.is-on { background: var(--ink); color: #fff; }
+.tl-period { position: relative; margin-left: auto; }
+.tl-period summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--rule-strong); background: var(--panel); font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer; user-select: none; }
+.tl-period summary::-webkit-details-marker { display: none; }
+.tl-period summary:hover { background: var(--paper-2); }
+.tl-period summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tl-period .tl-caret { font-size: 12px; color: var(--ink-3); transition: transform .15s var(--ease-out); }
+.tl-period[open] .tl-caret { transform: rotate(180deg); }
+.tl-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(340px, calc(100vw - 32px)); padding: 8px 0; background: var(--panel); border: 1px solid var(--rule-strong); box-shadow: 0 12px 32px rgba(30,36,48,.16); }
+.tl-menu-h { padding: 6px 16px; font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
+.tl-menu ul { list-style: none; }
+.tl-menu li a { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 16px 0 40px; font-size: 14px; color: var(--ink-2); text-decoration: none; }
+.tl-menu li a:hover { background: var(--paper-2); color: var(--ink); }
+.tl-menu li a.is-on { padding-left: 16px; color: var(--carbon-ink); font-weight: 700; }
+.tl-menu li a.is-on .bi { width: 16px; }
+.tl-custom { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); }
+.tl-custom.is-on .tl-menu-h { color: var(--carbon-ink); }
+.tl-custom-row { display: flex; align-items: center; gap: 6px; padding: 4px 16px; }
+.tl-custom-row input { height: 34px; min-width: 0; padding: 0 6px; border: 1px solid var(--rule-strong); background: var(--panel); color: var(--ink); font: 14px var(--font-ui); }
+.tl-hint { padding: 4px 16px 8px; font-size: 12px; color: var(--ink-3); }
+
+/* ── Cards ── */
+.ch-main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; margin-bottom: 12px; align-items: stretch; }
+.ch-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.ch-card { padding: 14px 16px; min-width: 0; }
+.ch-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.ch-head h2 { font-size: 14px; font-weight: 700; color: var(--ink); }
+.ch-hint { font-size: 12px; color: var(--ink-3); text-align: right; }
+.ch-empty { padding: 24px 0; text-align: center; font-size: 13px; color: var(--ink-3); }
+
+/* ── Time series ── */
+.ts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+.ts-axis { position: relative; width: 64px; height: 280px; }
+.ts-axis span { position: absolute; right: 0; transform: translateY(50%); font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.ts-plot { position: relative; min-width: 0; }
+.ts-grid { position: absolute; inset: 0 0 auto 0; height: 280px; pointer-events: none; }
+.ts-grid span { position: absolute; left: 0; right: 0; border-top: 1px solid var(--rule); }
+.ts-grid span:last-child { border-top-color: var(--rule-strong); }
+.ts-cols { position: relative; height: 280px; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px; }
+.ts-col { position: relative; display: flex; align-items: flex-end; justify-content: center; outline-offset: 0; cursor: default; }
+.ts-col:hover, .ts-col:focus-visible { background: rgba(36,70,122,.06); }
+.ts-bar { display: block; width: min(36px, 70%); min-height: 1px; background: var(--carbon-ink); border-radius: 4px 4px 0 0; transition: background-color .12s; }
+.ts-cols.is-dense .ts-bar { width: 80%; border-radius: 2px 2px 0 0; }
+.ts-col.is-current .ts-bar { background: repeating-linear-gradient(135deg, var(--carbon-ink) 0 3px, #5F7DA8 3px 6px); }
+.ts-col:hover .ts-bar, .ts-col:focus-visible .ts-bar { background: var(--ink); }
+.ts-tip { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translate(-50%, 4px); display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; background: var(--ink); color: #fff; font-size: 12.5px; white-space: nowrap; box-shadow: 0 8px 24px rgba(30,36,48,.25); opacity: 0; pointer-events: none; z-index: 5; transition: opacity .12s, transform .16s var(--ease-out); }
+.ts-col .ts-tip { bottom: auto; top: 8px; }
+.ts-tip .fig { font-size: 14px; font-weight: 700; }
+.ts-col:hover .ts-tip, .ts-col:focus-visible .ts-tip { opacity: 1; transform: translate(-50%, 0); }
+.ts-col:first-child .ts-tip { left: 0; transform: none; }
+.ts-col:last-child .ts-tip { left: auto; right: 0; transform: none; }
+.ts-labels { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px; margin-top: 6px; }
+.ts-labels span { display: flex; flex-direction: column; align-items: center; min-width: 0; font-size: 12px; color: var(--ink-2); line-height: 1.25; }
+.ts-labels b { font-weight: 600; white-space: nowrap; }
+.ts-labels i { font-style: normal; font-size: 11px; color: var(--ink-3); }
+.ts-labels.is-dense b { font-size: 11px; }
+.ch-table { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.ch-table summary { font-size: 13px; font-weight: 600; color: var(--carbon-ink); cursor: pointer; }
+.ch-table table { width: 100%; max-width: 420px; margin-top: 8px; border-collapse: collapse; font-size: 13px; }
+.ch-table th, .ch-table td { padding: 5px 8px; border-bottom: 1px solid var(--rule); text-align: left; }
+.ch-table .num { text-align: right; }
+
+/* ── Summary ── */
+.ch-sum { padding: 0; display: flex; flex-direction: column; }
+.ch-sum-tabs { display: flex; border-bottom: 1px solid var(--rule); }
+.ch-sum-tabs button { flex: 1; min-height: 44px; padding: 0 10px; margin-bottom: -1px; border: 0; border-bottom: 3px solid transparent; background: none; font: 600 13px var(--font-ui); color: var(--ink-2); cursor: pointer; }
+.ch-sum-tabs button:hover { background: var(--paper-2); color: var(--ink); }
+.ch-sum-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.ch-sum-tabs button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.ch-sum-list { padding: 6px 16px 10px; }
+.ch-sum-list div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px; }
+.ch-sum-list div:last-child { border-bottom: 0; }
+.ch-sum-list dt { color: var(--ink-2); }
+.ch-sum-list dd { color: var(--ink); font-weight: 600; }
+.ch-sum-list .is-strong dt, .ch-sum-list .is-strong dd { color: var(--ink); font-weight: 700; }
+
+/* ── Horizontal bars ── */
+.hb { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.hb li { display: flex; gap: 10px; align-items: flex-start; }
+.hb-rank { flex-shrink: 0; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; background: var(--paper-2); border: 1px solid var(--rule); font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.hb-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.hb-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.hb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.hb-val { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--ink); }
+.hb-sub { font-size: 12px; font-weight: 400; color: var(--ink-3); }
+.hb-bar { display: block; height: 6px; background: var(--paper-2); }
+.hb-bar > span { display: block; height: 100%; min-width: 2px; background: var(--carbon-ink); border-radius: 0 3px 3px 0; }
+
+/* ── Small columns ── */
+.sc { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px; }
+.sc-col { position: relative; display: grid; grid-template-rows: 150px auto; justify-items: center; outline-offset: 0; }
+.sc-plot { width: 100%; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--rule-strong); }
+.sc-bar { display: block; width: min(28px, 76%); min-height: 1px; background: var(--carbon-ink); border-radius: 3px 3px 0 0; }
+.sc-col.is-peak .sc-bar { background: var(--ink); }
+.sc-col:hover .sc-bar, .sc-col:focus-visible .sc-bar { background: var(--ink-deep); }
+.sc-lab { margin-top: 4px; font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+.sc-col .ts-tip { top: 0; bottom: auto; }
+.sc-col:hover .ts-tip, .sc-col:focus-visible .ts-tip { opacity: 1; transform: translate(-50%, 0); }
+.sc-col:first-child .ts-tip { left: 0; transform: none; }
+.sc-col:last-child .ts-tip { left: auto; right: 0; transform: none; }
+
+@media (max-width: 1199px) {
+  .ch-main { grid-template-columns: 1fr; }
+  .ch-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .ch-grid { grid-template-columns: 1fr; }
+  .tl-period { margin-left: 0; }
+  .tl-menu { left: 0; right: auto; }
+  .ts-axis { width: 48px; }
+  .ts-axis, .ts-grid, .ts-cols { height: 200px; }
+  .ts-labels.is-dense span:nth-child(odd) b { visibility: hidden; }
+}
+</style>
+<script>
+(function () {
+  // Summary tabs
+  const tabs = [...document.querySelectorAll('.ch-sum-tabs [role="tab"]')];
+  function select(tab) {
+    tabs.forEach(function (t) {
+      const on = t === tab;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', () => select(t));
+    t.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      select(next); next.focus();
+    });
+  });
+
+  // Close the period menu on outside click or Escape.
+  const menu = document.querySelector('.tl-period');
+  document.addEventListener('click', e => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); } });
+})();
+</script>
+{% endblock %}

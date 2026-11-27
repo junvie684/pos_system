@@ -2,292 +2,348 @@
 {% block title %}Dashboard — POS{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
 {% block topbar_actions %}
+<button type="button" class="btn btn-ghost" onclick="exportPdf()"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i> <span class="btn-text">Export PDF</span></button>
 <a href="{% url 'sales:create_sale' %}" class="btn btn-primary"><i class="bi bi-plus-lg" aria-hidden="true"></i> New sale</a>
 {% endblock %}
 
 {% block content %}
+{% include 'partials/dashboard_tabs.html' %}
+{% include 'partials/dashboard_print.html' %}
 {% if archive_unavailable %}
 <div class="alert alert-warning" role="status">
   <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
-  <span>The archive database isn't reachable, so sales older than the retention period are missing from the all-time figures.</span>
+  <span>The archive database isn't reachable, so archived sales are missing from these figures.</span>
 </div>
 {% endif %}
-<div class="db">
 
-  {# ── Today's figures ─────────────────────────────────────── #}
-  <div class="db-kpis">
-    <div class="db-kpi is-lead">
-      <span class="db-k">Sales today</span>
-      <span class="db-v fig">₱{{ total_today|floatformat:"2g" }}</span>
-      <p class="db-delta">
-        {% if today_delta_pct is None %}<span class="was">No sales yesterday to compare</span>
-        {% elif today_delta_pct >= 0 %}<span class="up"><i class="bi bi-arrow-up-right" aria-hidden="true"></i> <span class="fig">{{ today_delta_pct }}%</span></span> <span class="was">vs yesterday <span class="fig">₱{{ yesterday_total|floatformat:"2g" }}</span></span>
-        {% else %}<span class="down"><i class="bi bi-arrow-down-right" aria-hidden="true"></i> <span class="fig">{{ today_delta_abs }}%</span></span> <span class="was">vs yesterday <span class="fig">₱{{ yesterday_total|floatformat:"2g" }}</span></span>{% endif %}
-      </p>
-    </div>
-    <div class="db-kpi"><span class="db-k">Transactions</span><span class="db-v fig">{{ sales_count_today }}</span><p class="db-delta"><span class="was">completed today</span></p></div>
-    <div class="db-kpi"><span class="db-k">Average sale</span><span class="db-v fig">₱{{ avg_sale|floatformat:"2g" }}</span><p class="db-delta"><span class="was">per transaction</span></p></div>
-    <div class="db-kpi"><span class="db-k">Last 7 days</span><span class="db-v fig">₱{{ week_total|floatformat:"2g" }}</span><p class="db-delta"><span class="was">including today</span></p></div>
-  </div>
-
-  {# ── Week chart + attention ─────────────────────────────── #}
-  <div class="db-row db-row-main">
-    <section class="card db-card db-week" aria-labelledby="week-h">
-      <div class="db-head">
-        <h2 id="week-h">Sales per day</h2>
-        <span class="db-hint">Last 7 days · sale count under each day</span>
-      </div>
-      <figure class="week" aria-label="Sales per day, last 7 days">
-        {% if not week_total %}<p class="week-empty">No completed sales in the last 7 days.</p>{% endif %}
-        <div class="cols{% if not week_total %} is-empty{% endif %}" role="list">
-          {% for d in days %}
-          <div class="col{% if d.is_today %} is-today{% endif %}" role="listitem" tabindex="0"
-               aria-label="{{ d.date }}: ₱{{ d.revenue|floatformat:'2g' }}, {{ d.txns }} sale{{ d.txns|pluralize }}">
-            <div class="col-plot">
-              <span class="col-val fig">₱{{ d.revenue|floatformat:"0g" }}</span>
-              <span class="col-bar" style="height: {{ d.pct }}%"></span>
-            </div>
-            <span class="col-day">{% if d.is_today %}Today{% else %}{{ d.label }}{% endif %}</span>
-            <span class="col-txn fig">{{ d.txns }}</span>
-            <span class="tip" aria-hidden="true"><b>{{ d.date }}</b><span class="fig">₱{{ d.revenue|floatformat:"2g" }}</span><span>{{ d.txns }} sale{{ d.txns|pluralize }}</span></span>
-          </div>
-          {% endfor %}
-        </div>
-      </figure>
-    </section>
-
-    <div class="db-side">
-      <section class="card db-card" aria-labelledby="attn-h">
-        <div class="db-head"><h2 id="attn-h">Needs attention</h2></div>
-        <div class="attn">
-          <a class="attn-item{% if status_counts.pending %} is-held{% endif %}" href="{% url 'sales:pending_sales' %}">
-            <i class="bi bi-pause-circle" aria-hidden="true"></i>
-            <span><b class="fig">{{ status_counts.pending }}</b> held sale{{ status_counts.pending|pluralize }}</span>
-            <i class="bi bi-chevron-right go" aria-hidden="true"></i>
-          </a>
-          {% if user.profile.can_access_products %}<a class="attn-item{% if low_stock_count %} is-warn{% endif %}" href="{% url 'products:product_list' %}?stock=attention">
-            <i class="bi bi-box-seam" aria-hidden="true"></i>
-            <span><b class="fig">{{ low_stock_count }}</b> low or out of stock</span>
-            <i class="bi bi-chevron-right go" aria-hidden="true"></i>
-          </a>{% else %}<div class="attn-item{% if low_stock_count %} is-warn{% endif %}">
-            <i class="bi bi-box-seam" aria-hidden="true"></i>
-            <span><b class="fig">{{ low_stock_count }}</b> low or out of stock</span>
-          </div>{% endif %}
-        </div>
-      </section>
-
-      <section class="card db-card db-low" aria-labelledby="low-h">
-        <div class="db-head">
-          <h2 id="low-h">Low stock</h2>
-          {% if user.profile.can_access_products %}<a href="{% url 'products:product_list' %}?stock=attention" class="db-link">Manage <i class="bi bi-arrow-right" aria-hidden="true"></i></a>{% endif %}
-        </div>
-        {% if low_stock %}
-        <ul class="stock-list">
-          {% for product in low_stock %}
-          <li>
-            <span class="sl-name">{{ product.name }}</span>
-            <span class="sl-price fig">₱{{ product.price }}</span>
-            {% if product.stock == 0 %}<span class="sl-badge is-out fig">Out</span>{% else %}<span class="sl-badge fig">{{ product.stock }} left</span>{% endif %}
-          </li>
-          {% endfor %}
-        </ul>
-        {% if low_stock_count > 8 %}<p class="db-more">and {{ low_stock_count|add:"-8" }} more</p>{% endif %}
-        {% else %}
-        <p class="db-empty is-ok"><i class="bi bi-check-circle" aria-hidden="true"></i> Everything is stocked.</p>
-        {% endif %}
-      </section>
-    </div>
-  </div>
-
-  {# ── All-time breakdowns ────────────────────────────────── #}
-  <div class="db-row db-row-3">
-    <section class="card db-card" aria-labelledby="top-h">
-      <div class="db-head"><h2 id="top-h">Top products by sales</h2><span class="db-hint">all time</span></div>
-      {% if top_products_rows %}
-      <ol class="db-list">
-        {% for r in top_products_rows %}
-        <li>
-          <span class="db-rank fig">{{ forloop.counter }}</span>
-          <span class="db-li">
-            <span class="db-li-row"><span class="db-li-name" title="{{ r.name }}">{{ r.name }}</span><span class="db-li-val fig">₱{{ r.value|floatformat:"0g" }}</span></span>
-            <span class="db-bar"><span style="width: {{ r.pct }}%"></span></span>
-          </span>
-        </li>
-        {% endfor %}
-      </ol>
-      {% else %}<p class="db-empty">No completed sales yet.</p>{% endif %}
-    </section>
-
-    <section class="card db-card" aria-labelledby="units-h">
-      <div class="db-head"><h2 id="units-h">Top products by units</h2><span class="db-hint">all time</span></div>
-      {% if top_units_rows %}
-      <ol class="db-list">
-        {% for r in top_units_rows %}
-        <li>
-          <span class="db-rank fig">{{ forloop.counter }}</span>
-          <span class="db-li">
-            <span class="db-li-row"><span class="db-li-name" title="{{ r.name }}">{{ r.name }}</span><span class="db-li-val fig">{{ r.value }} sold</span></span>
-            <span class="db-bar is-carbon"><span style="width: {{ r.pct }}%"></span></span>
-          </span>
-        </li>
-        {% endfor %}
-      </ol>
-      {% else %}<p class="db-empty">No completed sales yet.</p>{% endif %}
-    </section>
-
-    <section class="card db-card" aria-labelledby="cash-h">
-      <div class="db-head"><h2 id="cash-h">Sales by cashier</h2><span class="db-hint">all time</span></div>
-      {% if cashier_data %}
-      <ul class="db-list">
-        {% for c in cashier_data %}
-        <li>
-          <span class="db-avatar" aria-hidden="true">{{ c.username|first|upper }}</span>
-          <span class="db-li">
-            <span class="db-li-row"><span class="db-li-name">{{ c.username }} <span class="db-li-sub fig">· {{ c.sales_count }} sale{{ c.sales_count|pluralize }}</span></span><span class="db-li-val fig">₱{{ c.revenue|floatformat:"0g" }}</span></span>
-            <span class="db-bar"><span style="width: {% widthratio c.revenue max_cashier_revenue 100 %}%"></span></span>
-          </span>
-        </li>
+{# ── Toolbar: search + period ─────────────────────────────── #}
+<div class="tl-bar">
+  <label class="tl-search">
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <span class="sr-only">Search the table</span>
+    <input type="search" id="tl-q" class="form-control" placeholder="Search" autocomplete="off">
+  </label>
+  <details class="tl-period">
+    <summary><i class="bi bi-calendar3" aria-hidden="true"></i> Period <i class="bi bi-chevron-down tl-caret" aria-hidden="true"></i></summary>
+    <div class="tl-menu">
+      <p class="tl-menu-h">Tiles</p>
+      <ul>
+        {% for key, label in presets %}
+        <li><a href="?preset={{ key }}"{% if key == preset %} class="is-on" aria-current="true"{% endif %}>{% if key == preset %}<i class="bi bi-check2" aria-hidden="true"></i>{% endif %}{{ label }}</a></li>
         {% endfor %}
       </ul>
-      {% else %}<p class="db-empty">No cashier sales yet.</p>{% endif %}
-
-      <div class="db-status">
-        <span class="db-status-h">Sale status</span>
-        <div class="seg" role="img" aria-label="Completed {{ status_counts.completed }}, refunded {{ status_counts.refunded }}, held {{ status_counts.pending }}">
-          {% if status_counts.completed %}<span class="seg-c" style="flex-grow: {{ status_pct.completed }}"></span>{% endif %}
-          {% if status_counts.refunded %}<span class="seg-r" style="flex-grow: {{ status_pct.refunded }}"></span>{% endif %}
-          {% if status_counts.pending %}<span class="seg-p" style="flex-grow: {{ status_pct.pending }}"></span>{% endif %}
+      <form class="tl-custom{% if preset == 'custom' %} is-on{% endif %}" method="get">
+        <input type="hidden" name="preset" value="custom">
+        <p class="tl-menu-h">{% if preset == 'custom' %}<i class="bi bi-check2" aria-hidden="true"></i> {% endif %}Custom range</p>
+        <div class="tl-custom-row">
+          <label><span class="sr-only">From</span><input type="date" name="from" value="{{ custom_from }}" max="{{ today|date:'Y-m-d' }}" required></label>
+          <span aria-hidden="true">–</span>
+          <label><span class="sr-only">To</span><input type="date" name="to" value="{{ custom_to }}" max="{{ today|date:'Y-m-d' }}" required></label>
+          <button type="submit" class="btn btn-sm">Apply</button>
         </div>
-        <ul class="seg-key">
-          <li><i class="k k-c"></i>Completed <b class="fig">{{ status_counts.completed }}</b></li>
-          <li><i class="k k-r"></i>Refunded <b class="fig">{{ status_counts.refunded }}</b> <span class="db-li-sub fig">({{ refund_rate }}%)</span></li>
-          <li><i class="k k-p"></i>Held <b class="fig">{{ status_counts.pending }}</b></li>
-        </ul>
-      </div>
-    </section>
-  </div>
+      </form>
+    </div>
+  </details>
 </div>
 
+{# ── Tiles ───────────────────────────────────────────────── #}
+<div class="tiles" style="--n: {{ tiles|length }}">
+  {% for t in tiles %}
+  <a class="tile{% if forloop.counter0 == selected %} is-on{% endif %}" href="?{{ qs_tile }}&amp;tile={{ forloop.counter0 }}"{% if forloop.counter0 == selected %} aria-current="true"{% endif %}>
+    <span class="tile-h">
+      <b>{{ t.title }}</b>
+      <span>{{ t.dates }}</span>
+    </span>
+    <span class="tile-b">
+      <span class="tile-k">Sales
+        {% if t.delta is not None %}<span class="tile-d {% if t.delta >= 0 %}up{% else %}down{% endif %} fig" title="Compared with the period before">{% if t.delta >= 0 %}+{% else %}−{% endif %}{{ t.delta_abs }}%</span>{% endif %}
+      </span>
+      <span class="tile-v fig">{% if t.forecast %}≈ {% endif %}₱{{ t.sales|floatformat:"2g" }}</span>
+      <span class="tile-grid">
+        <span><span class="tile-k">Orders / Units</span><span class="tile-n fig">{{ t.txns }} / {{ t.units }}</span></span>
+        <span><span class="tile-k">Refunds</span><span class="tile-n fig{% if t.refunds %} is-ref{% endif %}">{{ t.refunds }}</span></span>
+      </span>
+      <span class="tile-grid is-ruled">
+        <span><span class="tile-k">Refund cost</span><span class="tile-n fig">{% if t.refund_cost %}−₱{{ t.refund_cost|floatformat:"2g" }}{% else %}₱0.00{% endif %}</span></span>
+        <span><span class="tile-k">Net sales</span><span class="tile-n fig">₱{{ t.net|floatformat:"2g" }}</span></span>
+      </span>
+      <span class="tile-grid">
+        <span><span class="tile-k">Average sale</span><span class="tile-n fig">{% if t.avg is None %}—{% else %}₱{{ t.avg|floatformat:"2g" }}{% endif %}</span></span>
+        <span><span class="tile-k">Units / order</span><span class="tile-n fig">{% if t.units_per is None %}—{% else %}{{ t.units_per|floatformat:2 }}{% endif %}</span></span>
+      </span>
+    </span>
+    <span class="tile-f">{% if forloop.counter0 == selected %}Showing below{% else %}Show details{% endif %}</span>
+  </a>
+  {% endfor %}
+</div>
+
+{# ── Selected period: products / order items ─────────────── #}
+<section class="card dt" aria-labelledby="dt-h">
+  <div class="dt-head">
+    <h2 id="dt-h">{{ selected_title }} <span class="dt-dates">{{ selected_dates }}</span></h2>
+    <nav class="dt-tabs" aria-label="Table">
+      <a href="?{{ qs_view }}&amp;view=products" class="dt-tab{% if view == 'products' %} is-on{% endif %}"{% if view == 'products' %} aria-current="page"{% endif %}><i class="bi bi-box-seam" aria-hidden="true"></i>Products</a>
+      <a href="?{{ qs_view }}&amp;view=items" class="dt-tab{% if view == 'items' %} is-on{% endif %}"{% if view == 'items' %} aria-current="page"{% endif %}><i class="bi bi-cart3" aria-hidden="true"></i>Order items</a>
+    </nav>
+    {% if view == 'products' %}
+    <div class="dt-seg" role="group" aria-label="Group products">
+      <a href="?{{ qs_group }}&amp;group=category"{% if group == 'category' %} class="is-on" aria-current="true"{% endif %}>By category</a>
+      <a href="?{{ qs_group }}&amp;group=none"{% if group == 'none' %} class="is-on" aria-current="true"{% endif %}>All products</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="dt-wrap">
+  {% if view == 'products' %}
+    <table class="dt-table">
+      <thead>
+        <tr>
+          <th scope="col">{% if groups %}Category / Product{% else %}Product{% endif %}</th>
+          <th scope="col" class="num">Units sold <i class="bi bi-arrow-down" aria-label="sorted, most first"></i></th>
+          <th scope="col" class="num">Refunds</th>
+          <th scope="col" class="num">Sales</th>
+          <th scope="col" class="num">Refund cost</th>
+          <th scope="col" class="num">Net sales</th>
+          <th scope="col" class="num">Share</th>
+          <th scope="col" class="num">Avg selling price</th>
+          <th scope="col" class="num">Stock</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if groups %}
+          {% for g in groups %}
+          <tr class="dt-group" data-label="{{ g.name|lower }}">
+            <th scope="row"><button type="button" class="dt-toggle" aria-expanded="false"><i class="bi bi-chevron-right" aria-hidden="true"></i>{{ g.name }} <span class="dt-count fig">{{ g.count }}</span></button></th>
+            <td class="num fig">{{ g.units }}</td>
+            <td class="num fig{% if g.refund_units %} is-ref{% endif %}">{{ g.refund_units }}</td>
+            <td class="num fig">₱{{ g.sales|floatformat:"2g" }}</td>
+            <td class="num fig">{% if g.refund_cost %}−₱{{ g.refund_cost|floatformat:"2g" }}{% else %}₱0.00{% endif %}</td>
+            <td class="num fig">₱{{ g.net|floatformat:"2g" }}</td>
+            <td class="num fig">{% if g.share is None %}—{% else %}{{ g.share|floatformat:1 }}%{% endif %}</td>
+            <td class="num fig">{% if g.asp is None %}—{% else %}₱{{ g.asp|floatformat:"2g" }}{% endif %}</td>
+            <td class="num"></td>
+          </tr>
+          {% for r in g.items %}{% include 'sales/_dashboard_product_row.html' with child=True %}{% endfor %}
+          {% endfor %}
+        {% else %}
+          {% for r in rows %}{% include 'sales/_dashboard_product_row.html' %}{% endfor %}
+        {% endif %}
+        {% if not rows %}
+        <tr><td colspan="9" class="dt-empty">No sales or refunds in this period.</td></tr>
+        {% endif %}
+        <tr class="dt-none" hidden><td colspan="9" class="dt-empty">No rows match your search.</td></tr>
+      </tbody>
+      {% if rows %}
+      <tfoot>
+        <tr>
+          <th scope="row">Total</th>
+          <td class="num fig">{{ totals.units }}</td>
+          <td class="num fig">{{ totals.refund_units }}</td>
+          <td class="num fig">₱{{ totals.sales|floatformat:"2g" }}</td>
+          <td class="num fig">{% if totals.refund_cost %}−₱{{ totals.refund_cost|floatformat:"2g" }}{% else %}₱0.00{% endif %}</td>
+          <td class="num fig">₱{{ totals.net|floatformat:"2g" }}</td>
+          <td class="num fig">100%</td>
+          <td class="num"></td>
+          <td class="num"></td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  {% else %}
+    <table class="dt-table">
+      <thead>
+        <tr>
+          <th scope="col">Time</th>
+          <th scope="col">OR</th>
+          <th scope="col">Product</th>
+          <th scope="col" class="num">Qty</th>
+          <th scope="col" class="num">Unit price</th>
+          <th scope="col" class="num">Subtotal</th>
+          <th scope="col">Payment</th>
+          <th scope="col">Cashier</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in lines %}
+        <tr class="dt-line" data-label="{{ line.product.name|lower }} {{ line.sale.or_display|lower }} {{ line.sale.cashier_display|lower }} {{ line.sale.get_payment_method_display|lower }}">
+          <td class="fig">{{ line.sale.created_at|date:"M j, g:i A" }}</td>
+          <td class="fig">{% if line.sale.is_archived %}{{ line.sale.or_display|default:"—" }}{% else %}<a href="{% url 'sales:receipt' line.sale.pk %}">{{ line.sale.or_display|default:"—" }}</a>{% endif %}</td>
+          <td class="dt-name">{{ line.product.name }}</td>
+          <td class="num fig">{{ line.quantity }}</td>
+          <td class="num fig">₱{{ line.unit_price|floatformat:"2g" }}</td>
+          <td class="num fig">₱{{ line.subtotal|floatformat:"2g" }}</td>
+          <td>{{ line.sale.get_payment_method_display }}</td>
+          <td>{{ line.sale.cashier_display|default:"—" }}</td>
+          <td>{% if line.sale.status == 'refunded' %}<span class="dt-badge is-ref">Refunded</span>{% else %}<span class="dt-badge">Completed</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="9" class="dt-empty">No sales in this period.</td></tr>
+        {% endfor %}
+        <tr class="dt-none" hidden><td colspan="9" class="dt-empty">No rows match your search.</td></tr>
+      </tbody>
+    </table>
+    {% if line_total > lines|length %}<p class="dt-note">Showing the newest <span class="fig">{{ lines|length }}</span> of <span class="fig">{{ line_total }}</span> lines. The sales history has them all.</p>{% endif %}
+  {% endif %}
+  </div>
+</section>
+
 <style>
-.db { display: flex; flex-direction: column; gap: 12px; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
 
-/* ── Figures strip ── */
-.db-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--panel); border: 1px solid var(--rule); }
-.db-kpi { padding: 14px 18px; border-right: 1px solid var(--rule); min-width: 0; }
-.db-kpi:last-child { border-right: 0; }
-.db-kpi.is-lead { background: var(--carbon); }
-.db-k { display: block; font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
-.db-v { display: block; margin-top: 2px; font-size: 24px; font-weight: 700; letter-spacing: -.6px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.db-kpi.is-lead .db-v { font-size: 30px; letter-spacing: -1px; }
-.db-delta { margin-top: 4px; font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
-.db-delta .up { color: var(--green); font-weight: 700; }
-.db-delta .down { color: var(--ink); font-weight: 700; }
-.db-delta .was { color: var(--ink-3); }
+/* ── Toolbar ── */
+.tl-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.tl-search { position: relative; flex: 1 1 auto; max-width: 720px; }
+.tl-search .bi { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font-size: 14px; pointer-events: none; }
+.tl-search .form-control { height: 38px; min-height: 38px; padding: 0 10px 0 32px; font-size: 14px; }
+.tl-period { position: relative; margin-left: auto; }
+.tl-period summary { list-style: none; display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--rule-strong); background: var(--panel); font-size: 14px; font-weight: 600; color: var(--ink); cursor: pointer; user-select: none; }
+.tl-period summary::-webkit-details-marker { display: none; }
+.tl-period summary:hover { background: var(--paper-2); }
+.tl-period summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tl-period .tl-caret { font-size: 12px; color: var(--ink-3); transition: transform .15s var(--ease-out); }
+.tl-period[open] .tl-caret { transform: rotate(180deg); }
+.tl-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: min(440px, calc(100vw - 32px)); padding: 8px 0; background: var(--panel); border: 1px solid var(--rule-strong); box-shadow: 0 12px 32px rgba(30,36,48,.16); }
+.tl-menu-h { padding: 6px 16px; font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
+.tl-menu ul { list-style: none; }
+.tl-menu li a { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 16px 0 40px; font-size: 14px; color: var(--ink-2); text-decoration: none; }
+.tl-menu li a:hover { background: var(--paper-2); color: var(--ink); }
+.tl-menu li a.is-on { padding-left: 16px; color: var(--carbon-ink); font-weight: 700; }
+.tl-menu li a.is-on .bi { width: 16px; }
+.tl-custom { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--rule); }
+.tl-custom.is-on .tl-menu-h { color: var(--carbon-ink); }
+.tl-custom-row { display: flex; align-items: center; gap: 6px; padding: 4px 16px 8px; }
+.tl-custom-row input { height: 34px; padding: 0 8px; border: 1px solid var(--rule-strong); background: var(--panel); color: var(--ink); font: 14px var(--font-ui); }
 
-/* ── Rows and cards ── */
-.db-row { display: grid; gap: 12px; }
-.db-row-main { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); align-items: stretch; }
-.db-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
-.db-side { display: flex; flex-direction: column; gap: 12px; }
-.db-card { padding: 14px 16px; min-width: 0; }
-.db-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; }
-.db-head h2 { font-size: 14px; font-weight: 700; color: var(--ink); }
-.db-hint { font-size: 12px; color: var(--ink-3); text-align: right; }
-.db-link { font-size: 13px; font-weight: 600; color: var(--carbon-ink); text-decoration: none; display: inline-flex; gap: 6px; align-items: center; }
-.db-link:hover { text-decoration: underline; }
-.db-empty { padding: 20px 0; text-align: center; font-size: 13px; color: var(--ink-3); }
-.db-empty.is-ok .bi { color: var(--green); margin-right: 4px; }
-.db-more { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
+/* ── Tiles ── */
+.tiles { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.tile { display: flex; flex-direction: column; min-width: 0; background: var(--panel); border: 1px solid var(--rule); color: var(--ink); text-decoration: none; transition: border-color .12s, box-shadow .12s; }
+.tile:hover { border-color: var(--rule-strong); box-shadow: 0 4px 14px rgba(30,36,48,.07); }
+.tile:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.tile-h { display: flex; flex-direction: column; padding: 10px 14px; background: var(--carbon); border-bottom: 1px solid var(--carbon-rule); }
+.tile-h b { font-size: 14.5px; color: var(--ink); }
+.tile-h span { font-size: 12.5px; color: var(--carbon-ink); }
+.tile.is-on { border-color: var(--ink); }
+.tile.is-on .tile-h { background: var(--ink); border-color: var(--ink); }
+.tile.is-on .tile-h b { color: #fff; }
+.tile.is-on .tile-h span { color: var(--rail-ink-muted); }
+.tile-b { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 10px 14px 12px; }
+.tile-k { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.tile-d { font-size: 12px; font-weight: 700; }
+.tile-d.up { color: var(--green); }
+.tile-d.down { color: var(--red-ink); }
+.tile-v { margin-top: -6px; font-size: 24px; font-weight: 700; letter-spacing: -.6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tile-grid > span { min-width: 0; }
+.tile-grid.is-ruled { padding-top: 8px; border-top: 1px solid var(--rule); }
+.tile-n { display: block; font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-n.is-ref, .dt-table .is-ref { color: var(--red-ink); }
+.tile-f { padding: 8px 14px; border-top: 1px solid var(--rule); text-align: center; font-size: 13px; font-weight: 600; color: var(--carbon-ink); }
+.tile.is-on .tile-f { color: var(--ink); box-shadow: inset 0 -3px 0 var(--ink); }
 
-/* ── Week columns ── */
-.db-week { display: flex; flex-direction: column; }
-.week { position: relative; margin: 0; flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.cols { flex: 1; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; min-height: 240px; }
-.col { position: relative; display: grid; grid-template-rows: 1fr auto auto; justify-items: center; outline-offset: 0; }
-.col-plot { position: relative; width: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-bottom: 1px solid var(--rule-strong); padding-top: 22px; }
-.col-bar { display: block; width: min(44px, 64%); min-height: 2px; background: var(--rule-strong); transition: background-color .12s; }
-.col.is-today .col-bar { background: var(--ink); }
-.col-val { font-size: 12px; font-weight: 700; color: var(--ink-3); margin-bottom: 4px; white-space: nowrap; }
-.col.is-today .col-val { color: var(--ink); }
-.col-day { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
-.col.is-today .col-day { font-weight: 700; color: var(--ink); }
-.col-txn { font-size: 12px; color: var(--ink-3); }
-.week-empty { position: absolute; inset: 20px 0 52px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--ink-3); pointer-events: none; }
-.cols.is-empty .col-val { display: none; }
-.col:hover .col-bar, .col:focus-visible .col-bar { background: var(--ink-2); }
-.col.is-today:hover .col-bar { background: var(--ink-deep); }
-.tip { position: absolute; bottom: calc(100% - 14px); left: 50%; transform: translate(-50%, 4px); display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; background: var(--ink); color: #fff; font-size: 12.5px; white-space: nowrap; box-shadow: 0 8px 24px rgba(30,36,48,.25); opacity: 0; pointer-events: none; z-index: 5; transition: opacity .12s, transform .16s var(--ease-out); }
-.tip .fig { font-size: 14px; font-weight: 700; }
-.col:hover .tip, .col:focus-visible .tip { opacity: 1; transform: translate(-50%, 0); }
+/* ── Table section ── */
+.dt { padding: 0; overflow: hidden; }
+.dt-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; padding: 0 16px; border-bottom: 1px solid var(--rule); }
+.dt-head h2 { font-size: 16px; font-weight: 700; color: var(--ink); padding: 10px 0; }
+.dt-dates { margin-left: 6px; font-size: 13px; font-weight: 400; color: var(--ink-3); }
+.dt-tabs { display: flex; gap: 2px; align-self: stretch; }
+.dt-tab { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; min-height: 44px; margin-bottom: -1px; border-bottom: 3px solid transparent; font-size: 14px; font-weight: 600; color: var(--ink-2); text-decoration: none; }
+.dt-tab i { color: var(--ink-3); }
+.dt-tab:hover { color: var(--ink); background: var(--paper-2); }
+.dt-tab.is-on { color: var(--ink); border-bottom-color: var(--ink); }
+.dt-tab.is-on i { color: var(--ink); }
+.dt-seg { margin-left: auto; display: inline-flex; border: 1px solid var(--rule-strong); }
+.dt-seg a { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; font-size: 13px; font-weight: 600; color: var(--ink-2); text-decoration: none; }
+.dt-seg a + a { border-left: 1px solid var(--rule); }
+.dt-seg a:hover { background: var(--paper-2); color: var(--ink); }
+.dt-seg a.is-on { background: var(--ink); color: #fff; }
 
-/* ── Attention ── */
-.attn { display: flex; flex-direction: column; gap: 6px; }
-.attn-item { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 1px solid var(--rule); background: var(--paper); color: var(--ink); text-decoration: none; font-size: 14px; transition: border-color .12s, background-color .12s; }
-.attn-item:hover { border-color: var(--ink); }
-.attn-item > .bi:first-child { font-size: 17px; color: var(--ink-3); }
-.attn-item b { font-size: 15px; }
-.attn-item.is-held { background: var(--carbon); border-color: var(--carbon-rule); }
-.attn-item.is-held > .bi:first-child, .attn-item.is-held b { color: var(--carbon-ink); }
-.attn-item.is-warn { background: var(--amber-tint); border-color: var(--amber-rule); }
-.attn-item.is-warn > .bi:first-child, .attn-item.is-warn b { color: var(--amber-ink); }
-.attn-item .go { margin-left: auto; color: var(--ink-3); }
-
-/* ── Low stock ── */
-.stock-list { list-style: none; }
-.stock-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--rule); }
-.stock-list li:last-child { border-bottom: 0; }
-.sl-name { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sl-price { font-size: 12px; color: var(--ink-3); }
-.sl-badge { min-width: 54px; padding: 1px 6px; text-align: center; background: var(--amber-tint); color: var(--amber-ink); font-size: 12px; font-weight: 700; }
-.sl-badge.is-out { background: var(--red-tint); color: var(--red-ink); }
-
-/* ── Ranked lists ── */
-.db-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
-.db-list li { display: flex; gap: 10px; align-items: flex-start; }
-.db-rank, .db-avatar { flex-shrink: 0; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; background: var(--paper-2); border: 1px solid var(--rule); font-size: 12px; font-weight: 700; color: var(--ink-2); }
-.db-list li:first-child .db-rank { background: var(--red); border-color: var(--red); color: #fff; }
-.db-avatar { background: var(--carbon); border-color: var(--carbon-rule); color: var(--carbon-ink); }
-.db-li { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.db-li-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-.db-li-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--ink); }
-.db-li-val { flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--ink); }
-.db-li-sub { font-size: 12px; font-weight: 400; color: var(--ink-3); }
-.db-bar { display: block; height: 5px; background: var(--paper-2); }
-.db-bar > span { display: block; height: 100%; min-width: 2px; background: var(--ink); }
-.db-bar.is-carbon > span { background: var(--carbon-ink); }
-
-/* ── Status bar ── */
-.db-status { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); }
-.db-status-h { font-size: 12px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; color: var(--ink-3); }
-.seg { display: flex; gap: 2px; height: 10px; margin-top: 8px; background: var(--paper-2); }
-.seg span { min-width: 3px; }
-.seg-c, .k-c { background: var(--green); }
-.seg-r, .k-r { background: var(--red); }
-.seg-p, .k-p { background: var(--amber-mark); }
-.seg-key { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; font-size: 13px; color: var(--ink-2); }
-.seg-key li { display: inline-flex; align-items: center; gap: 6px; }
-.seg-key b { color: var(--ink); }
-.k { width: 10px; height: 10px; display: inline-block; }
+.dt-wrap { overflow-x: auto; }
+.dt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.dt-table th, .dt-table td { padding: 0 12px; height: 42px; border-bottom: 1px solid var(--rule); white-space: nowrap; text-align: left; }
+.dt-table thead th { height: 38px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); background: var(--paper-2); }
+.dt-table thead .bi { font-size: 11px; color: var(--ink-3); }
+.dt-table .num { text-align: right; }
+.dt-table td { color: var(--ink-2); }
+.dt-table th:first-child, .dt-table td:first-child { padding-left: 16px; }
+.dt-table tbody tr:hover > * { background: var(--paper-2); }
+.dt-table tfoot th, .dt-table tfoot td { font-weight: 700; color: var(--ink); border-top: 1px solid var(--rule-strong); border-bottom: 0; }
+.dt-group th { font-weight: 700; color: var(--ink); }
+.dt-group td { color: var(--ink); font-weight: 600; }
+.dt-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.dt-toggle .bi { width: 16px; font-size: 12px; color: var(--ink-3); transition: transform .15s var(--ease-out); }
+.dt-toggle[aria-expanded="true"] .bi { transform: rotate(90deg); }
+.dt-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.dt-count { min-width: 20px; padding: 0 5px; background: var(--paper-2); border: 1px solid var(--rule); font-size: 11.5px; font-weight: 600; color: var(--ink-3); text-align: center; }
+.dt-name { color: var(--ink); font-weight: 600; }
+.dt-child .dt-name { padding-left: 38px !important; font-weight: 400; }
+.dt-low { color: var(--amber-ink); font-weight: 700; }
+.dt-out { color: var(--red-ink); font-weight: 700; }
+.dt-badge { padding: 1px 6px; font-size: 12px; font-weight: 700; background: var(--green-tint); color: var(--green); }
+.dt-badge.is-ref { background: var(--red-tint); color: var(--red-ink); }
+.dt-table a { color: var(--carbon-ink); font-weight: 600; }
+.dt-table tr[hidden] { display: none; }
+.dt-table .dt-empty { height: 72px; text-align: center; color: var(--ink-3); }
+.dt-note { padding: 10px 16px; font-size: 12.5px; color: var(--ink-3); }
 
 @media (max-width: 1199px) {
-  .db-row-main { grid-template-columns: 1fr; }
-  .db-side { display: grid; grid-template-columns: 1fr 1fr; }
-  .db-row-3 { grid-template-columns: 1fr 1fr; }
-  .db-row-3 > :last-child { grid-column: 1 / -1; }
-}
-@media (max-width: 860px) {
-  .db-kpis { grid-template-columns: 1fr 1fr; }
-  .db-kpi:nth-child(2) { border-right: 0; }
-  .db-kpi:nth-child(-n+2) { border-bottom: 1px solid var(--rule); }
-  .db-side, .db-row-3 { grid-template-columns: 1fr; }
+  .tiles { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
 }
 @media (max-width: 600px) {
-  .db-kpi { padding: 10px 12px; }
-  .db-v { font-size: 19px; }
-  .db-kpi.is-lead .db-v { font-size: 22px; }
-  .cols { min-height: 170px; gap: 2px; }
-  .col:not(.is-today) .col-val { visibility: hidden; }
-  .col-day { font-size: 12px; }
+  .tl-bar { flex-wrap: wrap; }
+  .tl-search { flex-basis: 100%; max-width: none; }
+  .tl-period { margin-left: 0; }
+  .tl-menu { left: 0; right: auto; }
+  .tiles { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile-v { font-size: 19px; }
+  .dt-head { padding: 0 12px; }
+  .dt-seg { margin-left: 0; margin-bottom: 8px; }
 }
 </style>
+<script>
+(function () {
+  const q = document.getElementById('tl-q');
+  const none = document.querySelector('.dt-none');
+
+  // Each group row and the product rows under it.
+  const groups = [...document.querySelectorAll('.dt-group')].map(function (row) {
+    const kids = [];
+    let next = row.nextElementSibling;
+    while (next && next.classList.contains('dt-child')) { kids.push(next); next = next.nextElementSibling; }
+    return { row: row, kids: kids, btn: row.querySelector('.dt-toggle') };
+  });
+  const flat = [...document.querySelectorAll('.dt-line, .dt-prod:not(.dt-child)')];
+
+  function apply() {
+    const term = q.value.trim().toLowerCase();
+    let shown = 0;
+    groups.forEach(function (g) {
+      const open = g.btn.getAttribute('aria-expanded') === 'true';
+      const selfHit = !term || g.row.dataset.label.includes(term);
+      const hits = term ? g.kids.filter(k => k.dataset.label.includes(term)) : [];
+      g.row.hidden = !(selfHit || hits.length);
+      g.kids.forEach(k => { k.hidden = g.row.hidden || !(open || hits.includes(k)); });
+      if (!g.row.hidden) shown++;
+    });
+    flat.forEach(function (row) {
+      row.hidden = term && !row.dataset.label.includes(term);
+      if (!row.hidden) shown++;
+    });
+    if (none) none.hidden = shown > 0 || !(groups.length || flat.length);
+  }
+
+  groups.forEach(function (g) {
+    g.btn.addEventListener('click', function () {
+      g.btn.setAttribute('aria-expanded', g.btn.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+      apply();
+    });
+  });
+  q.addEventListener('input', apply);
+
+  // Close the period menu on outside click or Escape.
+  const menu = document.querySelector('.tl-period');
+  document.addEventListener('click', e => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); } });
+})();
+</script>
 {% endblock %}

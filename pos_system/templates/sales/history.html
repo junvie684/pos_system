@@ -68,9 +68,10 @@
             <span class="hx-count fig">{{ sale.items.all|length }}</span>{% for item in sale.items.all %}{{ item.product.name }} <span class="fig hx-qty">×{{ item.quantity }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}
           </td>
           <td class="hx-pay">{{ sale.get_payment_method_display }}</td>
-          <td class="hx-total fig num">₱{{ sale.total|floatformat:"2g" }}</td>
+          <td class="hx-total fig num">₱{{ sale.total|floatformat:"2g" }}{% if sale.is_partly_refunded %}<span class="hx-refunded">− ₱{{ sale.refunded_amount|floatformat:"2g" }} refunded</span>{% endif %}</td>
           <td>
-            {% if sale.status == 'completed' %}<span class="hx-status ok">Completed</span>
+            {% if sale.is_partly_refunded %}<span class="hx-status part">Partly refunded</span>
+            {% elif sale.status == 'completed' %}<span class="hx-status ok">Completed</span>
             {% elif sale.status == 'refunded' %}<span class="hx-status neg">Refunded</span>
             {% else %}<span class="hx-status warn">{{ sale.get_status_display }}</span>{% endif %}
           </td>
@@ -85,9 +86,9 @@
                 <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
               </button>
               {% else %}
-              <button type="button" class="hx-icon is-danger" onclick="openRefundModal({{ sale.pk }})" aria-label="Refund sale {{ sale.pk }}" title="Refund">
+              <a class="hx-icon is-danger" href="{% url 'sales:refund_sale' sale.pk %}" aria-label="Refund items from sale {{ sale.pk }}" title="Refund items">
                 <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
-              </button>
+              </a>
               {% endif %}
               {% endif %}
             </div>
@@ -181,6 +182,9 @@
 .hx-status.ok { color: #1F6B3D; }
 .hx-status.neg { color: var(--red-ink); }
 .hx-status.warn { color: var(--amber-ink); }
+.hx-status.part { color: var(--amber-ink); }
+.hx-refunded { display: block; font-size: 11.5px; font-weight: 600; color: var(--red-ink); }
+a.hx-icon { text-decoration: none; }
 .row-actions { display: flex; gap: 2px; justify-content: flex-end; }
 .hx-icon { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid transparent; background: transparent; color: var(--ink-2); font-size: 15px; cursor: pointer; transition: background-color .12s, border-color .12s, color .12s; }
 .hx-icon:hover { background: var(--panel); border-color: var(--rule-strong); color: var(--ink); }
@@ -226,27 +230,6 @@
 {% endblock content %}
 
 {% block modals %}
-<div class="modal-backdrop" id="refundModal" role="dialog" aria-modal="true" aria-labelledby="refund-title">
-  <div class="modal-box">
-    <div class="modal-header">
-      <span id="refund-title">Refund <span class="fig" id="modalSaleId"></span></span>
-      <button type="button" class="modal-close" onclick="closeRefundModal()" aria-label="Close"><i class="bi bi-x-lg"></i></button>
-    </div>
-    <div class="refund-body">
-      <p class="refund-meta" id="modalSaleMeta"></p>
-      <p class="refund-label">These items go back into stock</p>
-      <div id="modalItems" class="refund-items"></div>
-      <div class="refund-total"><span>Refund total</span><span class="fig">₱<span id="modalTotal"></span></span></div>
-      <p class="refund-warn"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> The sale will be marked refunded and its stock restored. This can't be undone.</p>
-    </div>
-    <form id="refundForm" method="post" class="modal-footer">
-      {% csrf_token %}
-      <button type="button" class="btn btn-ghost" onclick="closeRefundModal()">Cancel</button>
-      <button type="submit" class="btn btn-danger refund-go"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i> Refund sale</button>
-    </form>
-  </div>
-</div>
-
 <div class="modal-backdrop" id="receiptModal" role="dialog" aria-modal="true" aria-labelledby="receipt-title">
   <div class="modal-box receipt-box">
     <div class="modal-header">
@@ -261,15 +244,6 @@
 </div>
 
 <style>
-.refund-body { padding: 16px 20px 4px; }
-.refund-meta { font-size: 14px; color: var(--ink-2); }
-.refund-label { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-top: 14px; }
-.refund-items { margin-top: 6px; border-top: 1px solid var(--rule); }
-.refund-items div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px dashed var(--rule-strong); font-size: 14px; }
-.refund-items .fig { color: var(--ink-2); white-space: nowrap; }
-.refund-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px; padding-top: 8px; border-top: 2px solid var(--ink); font-weight: 700; }
-.refund-total .fig { font-size: 22px; }
-.refund-warn { display: flex; gap: 8px; margin: 14px 0 12px; padding: 10px 12px; border-radius: var(--radius); background: var(--red-tint); color: var(--red-ink-deep); font-size: 13.5px; font-weight: 600; }
 .modal-footer { justify-content: flex-end; }
 .receipt-box { max-width: 420px; overflow: hidden; }
 .receipt-actions { display: flex; gap: 6px; align-items: center; }
@@ -277,52 +251,8 @@
 </style>
 
 <script>
-const salesData = {
-  {% for sale in sales %}
-  {{ sale.pk }}: {
-    orNo: "{{ sale.or_display|default:sale.pk|escapejs }}",
-    date: "{{ sale.created_at|date:'M d, Y H:i' }}",
-    cashier: "{{ sale.cashier_display|escapejs }}",
-    total: "{{ sale.total|floatformat:'2g'|escapejs }}",
-    items: [
-      {% for item in sale.items.all %}
-      { name: "{{ item.product.name|escapejs }}", qty: {{ item.quantity }}, subtotal: "{{ item.subtotal|floatformat:'2g'|escapejs }}" }{% if not forloop.last %},{% endif %}
-      {% endfor %}
-    ]
-  }{% if not forloop.last %},{% endif %}
-  {% endfor %}
-};
 let lastFocus = null;
 
-function openRefundModal(saleId) {
-  const sale = salesData[saleId];
-  if (!sale) return;
-  lastFocus = document.activeElement;
-  document.getElementById('modalSaleId').textContent = sale.orNo;
-  document.getElementById('modalSaleMeta').textContent = sale.date + ' · ' + sale.cashier;
-  document.getElementById('modalTotal').textContent = sale.total;
-  const box = document.getElementById('modalItems');
-  box.innerHTML = '';
-  sale.items.forEach(item => {
-    const row = document.createElement('div');
-    const name = document.createElement('span');
-    name.textContent = item.name;
-    const fig = document.createElement('span');
-    fig.className = 'fig';
-    fig.textContent = '×' + item.qty + '  ₱' + item.subtotal;
-    row.append(name, fig);
-    box.appendChild(row);
-  });
-  document.getElementById('refundForm').action = "{% url 'sales:refund_sale' 0 %}".replace('/0/', '/' + saleId + '/');
-  document.getElementById('refundModal').classList.add('open');
-  document.body.style.overflow = 'hidden';
-  document.querySelector('#refundModal .btn-ghost').focus();
-}
-function closeRefundModal() {
-  document.getElementById('refundModal').classList.remove('open');
-  document.body.style.overflow = '';
-  if (lastFocus) lastFocus.focus();
-}
 function openReceiptModal(url) {
   lastFocus = document.activeElement;
   document.getElementById('receiptFrame').src = url;
@@ -339,10 +269,8 @@ function closeReceiptModal() {
 function printReceipt() {
   document.getElementById('receiptFrame').contentWindow.print();
 }
-['refundModal', 'receiptModal'].forEach(id => {
-  document.getElementById(id).addEventListener('click', e => {
-    if (e.target.id === id) (id === 'refundModal' ? closeRefundModal : closeReceiptModal)();
-  });
+document.getElementById('receiptModal').addEventListener('click', e => {
+  if (e.target.id === 'receiptModal') closeReceiptModal();
 });
 // Keep Tab inside an open dialog
 document.addEventListener('keydown', e => {
@@ -357,7 +285,6 @@ document.addEventListener('keydown', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (document.getElementById('refundModal').classList.contains('open')) closeRefundModal();
   if (document.getElementById('receiptModal').classList.contains('open')) closeReceiptModal();
 });
 </script>

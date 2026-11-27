@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def archived_receipt(request, sale_id):
     """Receipt of an archived sale of the signed-in store (read-only copy)."""
     try:
-        sale = get_object_or_404(ArchivedSale.objects.prefetch_related('items'), pk=sale_id)
+        sale = get_object_or_404(ArchivedSale.objects.prefetch_related('items', 'refunds__items'), pk=sale_id)
     except DatabaseError:
         logger.exception('Archive database unavailable')
         messages.error(request, "The archive database isn't reachable right now.")

@@ -1,0 +1,148 @@
+{% extends 'base.html' %}
+{% block title %}P&amp;L — Dashboard — POS{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block topbar_actions %}
+<button type="button" class="btn btn-ghost" onclick="exportPdf()"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i> <span class="btn-text">Export PDF</span></button>
+<a href="{% url 'sales:create_sale' %}" class="btn btn-primary"><i class="bi bi-plus-lg" aria-hidden="true"></i> New sale</a>
+{% endblock %}
+
+{% block content %}
+{% include 'partials/dashboard_tabs.html' %}
+{% include 'partials/dashboard_print.html' %}
+{% if archive_unavailable %}
+<div class="alert alert-warning" role="status">
+  <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+  <span>The archive database isn't reachable, so archived sales are missing from these figures.</span>
+</div>
+{% endif %}
+
+<section class="card pl" aria-labelledby="pl-h">
+  <h2 id="pl-h" class="sr-only">Profit and loss by month</h2>
+  <form class="pl-bar" method="get" action="{% url 'sales:pnl' %}">
+    <label class="pl-search">
+      <i class="bi bi-search" aria-hidden="true"></i>
+      <span class="sr-only">Search rows</span>
+      <input type="search" id="pl-q" class="form-control" placeholder="Search" autocomplete="off">
+    </label>
+    <label class="pl-period">
+      <i class="bi bi-calendar3" aria-hidden="true"></i>
+      <span class="sr-only">Period</span>
+      <select name="months" onchange="this.form.submit()">
+        {% for p in periods %}<option value="{{ p }}"{% if p == months %} selected{% endif %}>Last {{ p }} months, by month</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button type="submit" class="btn btn-sm">Show</button></noscript>
+    <a class="pl-dl" href="?months={{ months }}&amp;format=csv" title="Download CSV" aria-label="Download as CSV"><i class="bi bi-download" aria-hidden="true"></i></a>
+  </form>
+
+  <div class="pl-wrap" tabindex="0" aria-label="P&amp;L table, scrolls sideways">
+    <table class="pl-table">
+      <thead>
+        <tr>
+          <th scope="col" class="pl-lab">Parameter/Date</th>
+          {% for c in columns %}<th scope="col" class="num{% if c.current %} is-cur{% endif %}">{{ c.label }}</th>{% endfor %}
+          <th scope="col" class="num pl-tot">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="pl-row{% if r.strong %} is-strong{% endif %}" data-label="{{ r.label|lower }}">
+          <th scope="row" class="pl-lab">
+            {% if r.children %}<button type="button" class="pl-toggle" aria-expanded="false" aria-controls="{% for ch in r.children %}pl-{{ ch.key }} {% endfor %}"><i class="bi bi-chevron-right" aria-hidden="true"></i>{{ r.label }}</button>
+            {% else %}<span class="pl-name">{{ r.label }}</span>{% endif %}
+          </th>
+          {% for v in r.cells %}<td class="num fig{% if forloop.first %} is-cur{% endif %}">{{ v }}</td>{% endfor %}
+          <td class="num fig pl-tot">{{ r.total_text }}</td>
+        </tr>
+        {% for ch in r.children %}
+        <tr class="pl-child" id="pl-{{ ch.key }}" data-label="{{ ch.label|lower }} {{ r.label|lower }}" hidden>
+          <th scope="row" class="pl-lab"><span class="pl-name">{{ ch.label }}</span></th>
+          {% for v in ch.cells %}<td class="num fig{% if forloop.first %} is-cur{% endif %}">{{ v }}</td>{% endfor %}
+          <td class="num fig pl-tot">{{ ch.total_text }}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+        <tr class="pl-none" hidden><td colspan="{{ columns|length|add:2 }}">No rows match your search.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="pl-note">Sales count in the month they were made, refunds in the month the money went back. The POS doesn't record product costs or expenses, so there are no cost or profit rows.</p>
+</section>
+
+<style>
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+.pl { padding: 0; overflow: hidden; }
+.pl-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--rule); }
+.pl-search { position: relative; flex: 1 1 320px; max-width: 560px; }
+.pl-search .bi { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--ink-3); font-size: 14px; pointer-events: none; }
+.pl-search .form-control { height: 36px; min-height: 36px; padding: 0 10px 0 32px; font-size: 14px; }
+.pl-period { position: relative; display: inline-flex; align-items: center; }
+.pl-period .bi { position: absolute; left: 10px; color: var(--ink-3); font-size: 14px; pointer-events: none; }
+.pl-period select { height: 36px; padding: 0 10px 0 30px; border: 1px solid var(--rule-strong); background: var(--panel); color: var(--ink); font: 600 13.5px var(--font-ui); cursor: pointer; }
+.pl-period select:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.pl-dl { margin-left: auto; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--rule-strong); background: var(--panel); color: var(--ink-2); text-decoration: none; transition: background-color .12s, color .12s; }
+.pl-dl:hover { background: var(--paper-2); color: var(--ink); }
+
+.pl-wrap { overflow-x: auto; }
+.pl-wrap:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.pl-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
+.pl-table th, .pl-table td { padding: 0 12px; height: 40px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.pl-table thead th { height: 38px; font-size: 12.5px; font-weight: 700; color: var(--ink-2); background: var(--paper-2); }
+.pl-table .num { text-align: right; }
+.pl-table td { color: var(--ink-2); }
+.pl-lab { position: sticky; left: 0; z-index: 1; min-width: 180px; text-align: left; font-weight: 600; color: var(--ink); background: var(--panel); border-right: 1px solid var(--rule); }
+.pl-table thead .pl-lab { background: var(--paper-2); z-index: 2; }
+.pl-table .is-cur { background: var(--carbon); color: var(--ink); }
+.pl-table thead .is-cur { box-shadow: inset 0 -2px 0 var(--ink); }
+.pl-tot { font-weight: 700; color: var(--ink) !important; border-left: 1px solid var(--rule); }
+.pl-row:hover td, .pl-row:hover th, .pl-child:hover td, .pl-child:hover th { background: var(--paper-2); }
+.pl-row.is-strong th, .pl-row.is-strong td { font-weight: 700; color: var(--ink); border-top: 1px solid var(--rule-strong); }
+.pl-name { padding-left: 22px; }
+.pl-child .pl-lab { font-weight: 400; color: var(--ink-2); }
+.pl-child .pl-name { padding-left: 40px; }
+.pl-child td { font-size: 13px; color: var(--ink-3); }
+.pl-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.pl-toggle .bi { width: 16px; font-size: 12px; color: var(--ink-3); transition: transform .15s var(--ease-out); }
+.pl-toggle[aria-expanded="true"] .bi { transform: rotate(90deg); }
+.pl-toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pl-table tr[hidden] { display: none; }
+.pl-none td { text-align: center; color: var(--ink-3); height: 64px; }
+.pl-note { padding: 10px 16px; font-size: 12.5px; color: var(--ink-3); }
+
+@media (max-width: 600px) {
+  .pl-bar { padding: 10px 12px; }
+  .pl-search { flex-basis: 100%; max-width: none; }
+  .pl-lab { min-width: 130px; }
+}
+</style>
+<script>
+(function () {
+  const none = document.querySelector('.pl-none');
+
+  function apply() {
+    const q = document.getElementById('pl-q').value.trim().toLowerCase();
+    let shown = 0;
+    document.querySelectorAll('.pl-row').forEach(function (row) {
+      const btn = row.querySelector('.pl-toggle');
+      const open = btn && btn.getAttribute('aria-expanded') === 'true';
+      let kids = [], next = row.nextElementSibling;
+      while (next && next.classList.contains('pl-child')) { kids.push(next); next = next.nextElementSibling; }
+      const kidHits = kids.filter(k => q && k.dataset.label.includes(q));
+      const selfHit = !q || row.dataset.label.includes(q);
+      row.hidden = !(selfHit || kidHits.length);
+      kids.forEach(k => { k.hidden = row.hidden || !(open || (q && kidHits.includes(k))); });
+      if (!row.hidden) shown++;
+    });
+    none.hidden = shown > 0;
+  }
+
+  document.querySelectorAll('.pl-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      btn.setAttribute('aria-expanded', btn.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+      apply();
+    });
+  });
+  document.getElementById('pl-q').addEventListener('input', apply);
+})();
+</script>
+{% endblock %}

@@ -33,7 +33,7 @@ def login_view(request):
             messages.error(request, 'This account is not linked to a store. Please contact your administrator.')
             return render(request, 'accounts/login.html', {'form': form})
         if not tenant.is_active:
-            messages.error(request, 'This store has been deactivated. Please contact your administrator.')
+            messages.error(request, 'This store has been deactivated. Please contact your system provider or system administrator for assistance.')
             return render(request, 'accounts/login.html', {'form': form})
 
         login(request, user)

@@ -1,0 +1,11 @@
+<tr class="dt-prod{% if child %} dt-child{% endif %}" data-label="{{ r.name|lower }} {{ r.category|lower }}"{% if child %} hidden{% endif %}>
+  <th scope="row" class="dt-name">{{ r.name }}</th>
+  <td class="num fig">{{ r.units }}</td>
+  <td class="num fig{% if r.refund_units %} is-ref{% endif %}">{{ r.refund_units }}</td>
+  <td class="num fig">₱{{ r.sales|floatformat:"2g" }}</td>
+  <td class="num fig">{% if r.refund_cost %}−₱{{ r.refund_cost|floatformat:"2g" }}{% else %}₱0.00{% endif %}</td>
+  <td class="num fig">₱{{ r.net|floatformat:"2g" }}</td>
+  <td class="num fig">{% if r.share is None %}—{% else %}{{ r.share|floatformat:1 }}%{% endif %}</td>
+  <td class="num fig">{% if r.asp is None %}—{% else %}₱{{ r.asp|floatformat:"2g" }}{% endif %}</td>
+  <td class="num fig">{% if r.stock is None %}—{% elif r.stock == 0 %}<span class="dt-out">Out</span>{% elif r.stock <= 5 %}<span class="dt-low">{{ r.stock }}</span>{% else %}{{ r.stock }}{% endif %}</td>
+</tr>

@@ -13,11 +13,11 @@ from django.http import HttpResponse
 from django.core.paginator import Paginator
 
 from accounts.decorators import feature_required
-from sales.models import Sale, SaleItem
+from sales.models import Refund, Sale, SaleItem
 
 from .ledger import (
-    archived_completed, archived_refunds_given, archived_sales_made, archived_total, oldest_archived_year,
-    refunds_given, refunds_given_by, sales_made, total_of,
+    archived_completed, archived_refunds_given, archived_refunds_not_in_main, archived_sales_made,
+    archived_total, oldest_archived_year, refund_total_of, refunds_given, refunds_given_by, sales_made, total_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,11 @@ def _period_ledger(start, end):
     Includes sales moved to the archive database; if it can't be reached the
     ledger covers the main database only and says so."""
     made = sales_made(start, end).select_related('customer', 'cashier').order_by('created_at')
-    refunds = refunds_given(start, end).select_related('customer', 'cashier', 'refunded_by').order_by('refund_time')
+    refunds = (refunds_given(start, end)
+               .select_related('sale__customer', 'sale__cashier', 'refunded_by')
+               .prefetch_related('items__sale_item__product').order_by('refunded_at', 'pk'))
     gross = total_of(made)
-    refunded = total_of(refunds)
+    refunded = refund_total_of(refunds)
     made_count, refund_count = made.count(), refunds.count()
     archive_unavailable = False
 
@@ -39,11 +41,11 @@ def _period_ledger(start, end):
         if arch_made.exists() or arch_refunds.exists():
             # A sale caught mid-move can be in both databases; count it once.
             arch_made = arch_made.exclude(pk__in=list(made.values_list('pk', flat=True)))
-            arch_refunds = arch_refunds.exclude(pk__in=list(refunds.values_list('pk', flat=True)))
+            arch_refunds = archived_refunds_not_in_main(arch_refunds, refunds).select_related('sale').prefetch_related('items')
             gross += archived_total(arch_made)
             refunded += archived_total(arch_refunds)
             made = sorted([*made, *arch_made], key=lambda s: s.created_at)
-            refunds = sorted([*refunds, *arch_refunds], key=lambda s: s.refund_time)
+            refunds = sorted([*refunds, *arch_refunds], key=lambda r: r.refunded_at)
             made_count, refund_count = len(made), len(refunds)
     except DatabaseError:
         logger.exception('Archive database unavailable for report %s..%s', start, end)
@@ -77,14 +79,14 @@ def _ledger_csv(filename, ledger, when_format):
         ])
     writer.writerow([])
     writer.writerow(['REFUNDS GIVEN', '', 'Refunded by', 'Original sale', 'Amount', 'When'])
-    for sale in ledger['refunds']:
+    for refund in ledger['refunds']:
         writer.writerow([
-            sale.pk,
-            str(sale.customer) if sale.customer else 'Walk-in',
-            str(sale.refunded_by or sale.cashier),
-            timezone.localtime(sale.created_at).strftime('%b %d, %Y'),
-            -sale.total,
-            timezone.localtime(sale.refund_time).strftime(when_format),
+            refund.sale_id,
+            str(refund.customer) if refund.customer else 'Walk-in',
+            str(refund.given_by or ''),
+            timezone.localtime(refund.sale_created_at).strftime('%b %d, %Y'),
+            -refund.total,
+            timezone.localtime(refund.refunded_at).strftime(when_format),
         ])
     writer.writerow([])
     writer.writerow(['', '', '', 'GROSS SALES', ledger['gross_sales'], ''])
@@ -233,13 +235,13 @@ def analytics(request):
         status='completed',
         created_at__date__gte=curr_start,
         created_at__date__lte=curr_end,
-    ).select_related('customer', 'cashier').prefetch_related('items').order_by('-created_at')
+    ).select_related('customer', 'cashier').prefetch_related('items', 'refunds__items').order_by('-created_at')
 
     prev_qs = Sale.objects.filter(
         status='completed',
         created_at__date__gte=prev_start,
         created_at__date__lte=prev_end,
-    ).prefetch_related('items')
+    ).prefetch_related('items', 'refunds__items')
 
     # ── Stats ─────────────────────────────────────────────────────
     # Sales past the retention period live in the archive database; they are
@@ -257,8 +259,9 @@ def analytics(request):
         logger.exception('Archive database unavailable for analytics')
         archive_unavailable = True
 
-    curr_revenue = sum(s.total for s in curr_sales_list)
-    prev_revenue = sum(s.total for s in prev_sales_list)
+    # Completed sales, less anything handed back on the ones partly refunded.
+    curr_revenue = sum(s.kept_total for s in curr_sales_list)
+    prev_revenue = sum(s.kept_total for s in prev_sales_list)
     curr_count = len(curr_sales_list)
     prev_count = len(prev_sales_list)
     curr_avg = (curr_revenue / curr_count) if curr_count else 0
@@ -282,7 +285,7 @@ def analytics(request):
         buckets = {}
         for sale in sales:
             k = key(timezone.localtime(sale.created_at))
-            buckets[k] = buckets.get(k, 0) + float(sale.total)
+            buckets[k] = buckets.get(k, 0) + float(sale.kept_total)
         return buckets
 
     if mode == 'daily':
@@ -346,7 +349,7 @@ def analytics(request):
                 sale.pk,
                 str(sale.customer) if sale.customer else 'Walk-in',
                 str(sale.cashier),
-                sale.total,
+                sale.kept_total,
                 timezone.localtime(sale.created_at).strftime('%Y-%m-%d %H:%M'),
             ])
         writer.writerow([])
@@ -380,7 +383,7 @@ def analytics(request):
     for sale in curr_sales_list:
         row = mix.setdefault(sale.payment_method, {'label': method_names.get(sale.payment_method, sale.payment_method), 'count': 0, 'amount': 0})
         row['count'] += 1
-        row['amount'] += sale.total
+        row['amount'] += sale.kept_total
     payment_mix = sorted(mix.values(), key=lambda r: -r['amount'])
     for row in payment_mix:
         row['pct'] = round(float(row['amount']) / float(curr_revenue) * 100, 1) if curr_revenue else 0
@@ -534,8 +537,8 @@ def shift_report(request):
     ]
 
     # --- Refunds handed out this day ---
-    total_refunds = total_of(refunds_qs)
-    cash_refunds = total_of(refunds_qs.filter(payment_method='cash'))  # only these leave the drawer
+    total_refunds = refund_total_of(refunds_qs)
+    cash_refunds = refund_total_of(refunds_qs.filter(sale__payment_method='cash'))  # only these leave the drawer
     refund_count = refunds_qs.count()
 
     total_gross = starting_cash + cash_sales          # cash taken in, plus the float
@@ -549,7 +552,7 @@ def shift_report(request):
         # Anyone who rang up a sale or handed out a refund (TenantManager scopes these)
         tenant_cashier_ids = set(
             Sale.objects.filter(status__in=('completed', 'refunded')).values_list('cashier_id', flat=True)
-        ) | set(Sale.objects.exclude(refunded_by=None).values_list('refunded_by_id', flat=True))
+        ) | set(Refund.objects.exclude(refunded_by=None).values_list('refunded_by_id', flat=True))
         cashiers = User.objects.filter(pk__in=tenant_cashier_ids)
     else:
         cashiers = User.objects.filter(pk=request.user.pk)  # Only themselves

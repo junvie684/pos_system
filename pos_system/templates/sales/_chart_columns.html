@@ -1,0 +1,12 @@
+{# Small column chart: rows = [{label, full, value, pct}]; the tallest is marked. #}
+{% if rows %}
+<div class="sc" role="list" style="--n: {{ rows|length }}">
+  {% for r in rows %}
+  <div class="sc-col{% if r.pct == 100.0 %} is-peak{% endif %}" role="listitem" tabindex="0" aria-label="{{ r.full }}: ₱{{ r.value|floatformat:'2g' }}">
+    <span class="sc-plot"><span class="sc-bar" style="height: {{ r.pct }}%"></span></span>
+    <span class="sc-lab">{{ r.label }}</span>
+    <span class="ts-tip" aria-hidden="true"><b>{{ r.full }}</b><span class="fig">₱{{ r.value|floatformat:"2g" }}</span></span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}<p class="ch-empty">{{ empty }}</p>{% endif %}
