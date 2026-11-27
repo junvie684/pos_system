@@ -185,6 +185,7 @@ class PriceCheckerStockTests(TestCase):
 
 class SignOutTests(TestCase):
     """Signing out takes a POST, so another site can't sign people out with a link."""
+    databases = {'default', 'archive'}   # sales history also reads the archive
 
     def setUp(self):
         self.tenant = make_tenant('store-a')
@@ -208,6 +209,29 @@ class SignOutTests(TestCase):
         self.assertEqual(self.client.get('/platform/').status_code, 200)
         self.client.post('/platform/logout/')
         self.assertEqual(self.client.get('/platform/').status_code, 302)
+
+    def test_signed_in_pages_are_not_kept_by_the_browser(self):
+        pos_login(self.client, self.cashier)
+        for url in ('/new/', '/history/'):
+            with self.subTest(url=url):
+                cache = self.client.get(url)['Cache-Control']
+                self.assertIn('no-store', cache)
+                self.assertIn('private', cache)
+        self.assertIn('no-store', self.client.post('/accounts/logout/')['Cache-Control'])
+
+    def test_back_after_sign_out_reaches_the_sign_in_page(self):
+        pos_login(self.client, self.cashier)
+        self.client.post('/accounts/logout/')
+        self.assertRedirects(self.client.get('/new/'), '/accounts/login/', fetch_redirect_response=False)
+
+    def test_back_after_sign_in_skips_the_sign_in_page(self):
+        # The sign-in pages are never stored, so Back re-asks the server...
+        for url in ('/accounts/login/', '/platform/login/'):
+            with self.subTest(url=url):
+                self.assertIn('no-store', self.client.get(url)['Cache-Control'])
+        # ...which sends someone already signed in on to the POS.
+        pos_login(self.client, self.cashier)
+        self.assertRedirects(self.client.get('/accounts/login/'), '/', fetch_redirect_response=False)
 
     def test_sign_out_menu_posts_a_form(self):
         pos_login(self.client, self.cashier)

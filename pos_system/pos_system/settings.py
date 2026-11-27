@@ -121,6 +121,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',  # ← before TenantMiddleware
+    'pos_system.middleware.NoStoreWhenSignedInMiddleware',      # Back after sign-out can't show a saved page
     'tenants.middleware.TenantMiddleware',                       # ← moved after auth
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',

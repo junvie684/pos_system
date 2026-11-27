@@ -15,6 +15,7 @@ from django.utils.text import slugify
 from django.contrib import messages
 from django.http import Http404, JsonResponse
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
 from .decorators import is_platform_admin, platform_admin_required, platform_permission_required
@@ -397,6 +398,7 @@ def remove_store_user(request, tenant_id, user_id):
 # LOGIN / LOGOUT
 # ═══════════════════════════════════════════════════════════════
 
+@never_cache   # Back after signing in asks the server again, which sends a signed-in admin on
 def platform_login(request):
     # ✅ Also check app_type so an admin session isn't mistaken for already-authed
     if (is_platform_admin(request.user)

@@ -898,5 +898,13 @@
   })();
 </script>
 {% endif %}
+{% if user.is_authenticated %}
+<script>
+  // Backup for the no-store header: a browser that still restores this page
+  // from its back/forward cache reloads it, so the server decides what to show
+  // (the sign-in page, once signed out).
+  window.addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+</script>
+{% endif %}
 </body>
 </html>

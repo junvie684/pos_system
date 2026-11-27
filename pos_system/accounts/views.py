@@ -6,6 +6,7 @@ from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.http import Http404, JsonResponse
 from django.urls import reverse
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
 
 from .decorators import admin_required
@@ -17,6 +18,7 @@ from tenants.models import Tenant
 
 
 # ─── Auth ────────────────────────────────────────────────────
+@never_cache   # Back after signing in asks the server again, which sends a signed-in user on to the POS
 def login_view(request):
     if request.user.is_authenticated and request.session.get('app_type') == 'pos':
         return redirect('/')

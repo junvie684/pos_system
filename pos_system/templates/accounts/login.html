@@ -188,8 +188,11 @@
     submit.setAttribute('aria-busy', 'true');
     submit.textContent = 'Signing in…';
   });
-  // Coming back via the browser's Back button restores the button.
-  window.addEventListener('pageshow', () => {
+  // Coming back via the browser's Back button restores the button. A page the
+  // browser restored from memory (despite no-store) reloads instead, so a
+  // signed-in user is sent on to the POS rather than shown this form.
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) { location.reload(); return; }
     submit.removeAttribute('aria-busy');
     submit.textContent = 'Open register';
   });
