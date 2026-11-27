@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
+from unittest import mock
 
 from django.core.management import call_command
 from django.test import TestCase
@@ -129,6 +130,15 @@ class ArchiveCommandTests(TestCase):
     databases = BOTH_DBS
 
     def setUp(self):
+        # The auto store's archive hour is set to "now", and the command checks
+        # the hour again when it runs. A run that crossed into the next hour
+        # (one did, at midnight) found the store not due. Pin the clock to the
+        # middle of an hour so both checks always agree.
+        fixed_now = timezone.make_aware(datetime(2026, 11, 25, 10, 30))
+        clock = mock.patch('django.utils.timezone.now', return_value=fixed_now)
+        clock.start()
+        self.addCleanup(clock.stop)
+
         self.auto = make_tenant('auto-store')
         self.manual = make_tenant('manual-store')
         Tenant.objects.filter(pk=self.auto.pk).update(auto_archive=True, archive_hour=timezone.localtime().hour)
