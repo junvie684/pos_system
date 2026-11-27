@@ -1,3 +1,4 @@
+from django.core.validators import MinValueValidator
 from django.db import models
 from tenants.base_model import TenantModel
 
@@ -9,6 +10,10 @@ class Product(TenantModel):
     name = models.CharField(max_length=200)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    # What the store pays for one unit: the cost of goods sold (COGS) per item.
+    # Optional: products added before costs were recorded have none.
+    cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True,
+                               validators=[MinValueValidator(0)])
     stock = models.PositiveIntegerField(default=0)
     barcode = models.CharField(max_length=100, unique=True, blank=True, null=True)
     image = models.ImageField(upload_to='products/', blank=True, null=True)

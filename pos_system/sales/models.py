@@ -94,6 +94,10 @@ class SaleItem(TenantModel):
     product    = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity   = models.PositiveIntegerField()
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    # The product's cost (COGS per unit) when the sale was completed, so a later
+    # cost change never rewrites past costs. None: sold before costs were saved,
+    # or the product had no cost then.
+    unit_cost  = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     @property
     def subtotal(self):

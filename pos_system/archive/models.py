@@ -113,6 +113,7 @@ class ArchivedSaleItem(TenantModel):
     product_barcode = models.CharField(max_length=100, blank=True)
     quantity        = models.PositiveIntegerField()
     unit_price      = models.DecimalField(max_digits=10, decimal_places=2)
+    unit_cost       = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # see SaleItem
 
     @property
     def product(self):

@@ -71,6 +71,7 @@ def _copy(sales):
                 product_barcode=item.product.barcode or '',
                 quantity=item.quantity,
                 unit_price=item.unit_price,
+                unit_cost=item.unit_cost,
             ))
     return archived, lines
 

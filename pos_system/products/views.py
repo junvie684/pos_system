@@ -46,6 +46,25 @@ def product_list(request):
     page_obj = paginator.get_page(request.GET.get('page'))
     categories = Category.objects.order_by('name')
 
+    # Sales figures across every product. Revenue and profit are report
+    # figures, so only users with Reports access see them. The period is
+    # remembered for the session, so searching and paging keep it.
+    overview = None
+    if getattr(getattr(request.user, 'profile', None), 'can_access_reports', False):
+        from .figures import DEFAULT_PERIOD, PERIODS, figures_by_product, period_dates
+        period = request.GET.get('period') or request.session.get('products_period', DEFAULT_PERIOD)
+        if period not in PERIODS:
+            period = DEFAULT_PERIOD
+        request.session['products_period'] = period
+        start, end = period_dates(period)
+        overview = {'fig': figures(start, end, include_archive=True), 'period': period,
+                    'periods': list(PERIODS.items()), 'start': start, 'end': end,
+                    'label': PERIODS[period]}
+        # The table's Gross profit column: the same period, for this page's products.
+        per_product = figures_by_product(start, end, list(page_obj), include_archive=True)
+        for p in page_obj:
+            p.fig = per_product[p.pk]
+
     return render(request, 'products/product_list.html', {
         'products': page_obj,
         'page_obj': page_obj,
@@ -57,6 +76,7 @@ def product_list(request):
         'out_count': out_count,
         'all_count': all_count,
         'max_stock': max_stock,
+        'overview': overview,
     })
 
 
@@ -75,6 +95,7 @@ def add_product(request):
                         'category': product.category.name if product.category else None,
                         'category_id': product.category.pk if product.category else None,
                         'price': str(product.price),
+                        'cost': '' if product.cost is None else f'{product.cost:.2f}',
                         'stock': product.stock,
                     }
                 })
@@ -103,6 +124,7 @@ def edit_product(request, pk):
                         'category': product.category.name if product.category else None,
                         'category_id': product.category.pk if product.category else None,
                         'price': str(product.price),
+                        'cost': '' if product.cost is None else f'{product.cost:.2f}',
                         'stock': product.stock,
                         'barcode': product.barcode or '',
                         'is_active': product.is_active,
@@ -190,6 +212,7 @@ def delete_category(request, pk):
 
 import csv
 from datetime import datetime, timedelta
+from decimal import Decimal
 from django.db.models import Sum, Count, F, Q
 from django.db.models.functions import TruncDate, TruncMonth
 from django.shortcuts import render, redirect, get_object_or_404
@@ -198,6 +221,7 @@ from django.http import JsonResponse, HttpResponse
 from django.core.paginator import Paginator
 from django.contrib import messages
 from accounts.decorators import feature_required
+from .figures import figures
 from .models import Product, Category
 from .forms import ProductForm
 
@@ -276,6 +300,13 @@ def product_sales_history(request, product_id):
     totals['avg_per_sale'] = totals['total_units'] / totals['total_transactions'] if totals[
                                                                                          'total_transactions'] > 0 else 0
 
+    # Cost (COGS) and gross profit, by the rules in figures.py. Main database
+    # only, like the chart and table on this page.
+    fig = figures(date_from, date_to, product=product)
+    totals.update(total_cost=fig.total_cost, cost_note=fig.cost_note,
+                  gross_profit=fig.gross_profit, gross_profit_abs=fig.gross_profit_abs,
+                  margin=fig.margin, profit_note=fig.profit_note)
+
     # --- CSV Export ---
     if request.GET.get('export') == 'csv':
         response = HttpResponse(content_type='text/csv')
@@ -299,6 +330,12 @@ def product_sales_history(request, product_id):
             totals['total_transactions'],
             round(totals['avg_per_sale'], 1)
         ])
+        if totals['total_cost'] is not None:
+            writer.writerow([])
+            writer.writerow(['Total cost (COGS)', f"{totals['total_cost']:.2f}", totals['cost_note']])
+            writer.writerow(['Gross profit', f"{totals['gross_profit']:.2f}",
+                             '' if totals['margin'] is None else f"{totals['margin']}% margin",
+                             totals['profit_note']])
         return response
 
     return render(request, 'products/product_history.html', {
@@ -309,4 +346,6 @@ def product_sales_history(request, product_id):
         'date_to': date_to.strftime('%Y-%m-%d'),
         'group_by': group_by,
         'has_data': len(history) > 0,
+        'no_chart': len(history) == 0,
+        'fig': fig,
     })

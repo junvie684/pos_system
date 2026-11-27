@@ -1,0 +1,47 @@
+{% comment %}
+Sales figure tiles (products/figures.py), shared by the Products tab and a
+product's history page. Needs: fig (a Figures). Optional: lead (highlight
+Units sold, the figure the history chart plots), tight (nothing follows in
+the card, so no gap under the tiles), here (already on the Products tab: no
+link to it).
+{% endcomment %}
+<dl class="ph-figs{% if tight %} is-only{% endif %}">
+  <div{% if lead %} class="is-lead"{% endif %}><dt>Units sold</dt><dd class="fig">{{ fig.units }}</dd></div>
+  <div><dt>Revenue</dt><dd class="fig">₱{{ fig.revenue|floatformat:"2g" }}</dd></div>
+  <div>
+    <dt>Total cost (COGS)</dt>
+    {% if fig.total_cost is not None %}
+    <dd class="fig">₱{{ fig.total_cost|floatformat:"2g" }}</dd>
+    <dd class="ph-sub">{{ fig.cost_note }}</dd>
+    {% else %}
+    <dd class="fig is-none">—</dd>
+    <dd class="ph-sub">No unit cost set{% if user.profile.can_access_products and not here %} · <a href="{% url 'products:product_list' %}">set it in Products</a>{% endif %}</dd>
+    {% endif %}
+  </div>
+  <div>
+    <dt>Gross profit</dt>
+    {% if fig.gross_profit is not None %}
+    <dd class="fig{% if fig.gross_profit < 0 %} is-loss{% endif %}">{% if fig.gross_profit < 0 %}−{% endif %}₱{{ fig.gross_profit_abs|floatformat:"2g" }}</dd>
+    <dd class="ph-sub">{% if fig.gross_profit < 0 %}Loss{% if fig.margin is not None %} · <span class="fig">{{ fig.margin }}%</span>{% endif %}{% elif fig.margin is not None %}<span class="fig">{{ fig.margin }}%</span> margin{% endif %}{% if fig.profit_note %} · {{ fig.profit_note }}{% endif %}</dd>
+    {% else %}
+    <dd class="fig is-none">—</dd>
+    <dd class="ph-sub">Needs a unit cost</dd>
+    {% endif %}
+  </div>
+  <div><dt>Transactions</dt><dd class="fig">{{ fig.transactions }}</dd></div>
+  <div><dt>Units per sale</dt><dd class="fig">{% if fig.units_per_sale %}{{ fig.units_per_sale|floatformat:1 }}{% else %}—{% endif %}</dd></div>
+</dl>
+<style>
+.ph-figs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; margin: 0 0 18px; background: var(--rule); border: 1px solid var(--rule); }
+.ph-figs.is-only { margin-bottom: 0; }
+.ph-figs > div { padding: 10px 16px 12px; background: var(--paper-2); min-width: 0; }
+.ph-figs > div.is-lead { background: var(--panel); box-shadow: inset 0 3px 0 var(--brand-blue); }
+.ph-figs dt { font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.ph-figs dd { margin: 2px 0 0; font-size: 22px; font-weight: 700; letter-spacing: -.5px; line-height: 1.2; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-figs dd.is-none { color: var(--ink-3); }
+.ph-figs dd.is-loss { color: var(--red-ink); }
+.ph-figs .ph-sub { margin-top: 2px; font-size: 12px; font-weight: 400; letter-spacing: 0; color: var(--ink-3); white-space: normal; }
+.ph-figs .ph-sub a { color: var(--brand-blue); font-weight: 600; }
+@media (max-width: 1100px) { .ph-figs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .ph-figs { grid-template-columns: 1fr 1fr; } .ph-figs dd { font-size: 19px; } }
+</style>

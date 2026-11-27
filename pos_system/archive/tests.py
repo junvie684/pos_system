@@ -52,6 +52,12 @@ class ArchiverTests(TestCase):
         line = ArchivedSaleItem.all_objects.get(sale_id=sale.pk)
         self.assertEqual((line.product_name, line.quantity), ('Pandesal', 2))
 
+    def test_saved_cost_moves_with_the_line(self):
+        sale = self.old_sale()
+        SaleItem.all_objects.filter(sale_id=sale.pk).update(unit_cost=Decimal('30.00'))
+        archive_store(self.store)
+        self.assertEqual(ArchivedSaleItem.all_objects.get(sale_id=sale.pk).unit_cost, Decimal('30.00'))
+
     def test_recent_and_held_sales_stay(self):
         recent = self.old_sale(days=30)
         held = self.old_sale(days=400, status='pending')

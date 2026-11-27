@@ -21,6 +21,32 @@
 <div class="card rx-box">
 {% include 'partials/records_tabs.html' %}
 
+{% if overview %}
+<!-- ── Sales figures across every product ── -->
+<section class="pv" aria-labelledby="pv-h">
+  <div class="pv-head">
+    <div>
+      <h2 id="pv-h">All products</h2>
+      <p class="pv-scope">Completed sales{% if overview.start %}, <span class="fig">{{ overview.start|date:"Y-m-d" }}</span> to <span class="fig">{{ overview.end|date:"Y-m-d" }}</span>{% else %}, all time{% endif %}</p>
+    </div>
+    <form method="get" class="pv-period">
+      <label for="pv-period">Period</label>
+      <select id="pv-period" name="period" class="form-control" onchange="this.form.submit()">
+        {% for key, label in overview.periods %}<option value="{{ key }}" {% if key == overview.period %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if search %}<input type="hidden" name="q" value="{{ search }}">{% endif %}
+      {% if stock_filter %}<input type="hidden" name="stock" value="{{ stock_filter }}">{% endif %}
+      {% if show_inactive %}<input type="hidden" name="show_inactive" value="1">{% endif %}
+      <noscript><button type="submit" class="btn btn-primary btn-sm">Show</button></noscript>
+    </form>
+  </div>
+  {% if not overview.fig.archive_ok %}
+  <p class="pv-warn"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> The archive database isn't reachable, so sales older than the retention period are missing.</p>
+  {% endif %}
+  {% include 'products/_sales_figures.html' with fig=overview.fig tight=True here=True %}
+</section>
+{% endif %}
+
 
 <div class="rx-toolbar">
   <form method="get" id="search-form" class="rx-search" role="search">
@@ -50,19 +76,34 @@
           <th scope="col">Product</th>
           <th scope="col">Category</th>
           <th scope="col" class="num">Price</th>
+          <th scope="col" class="num" title="Cost of goods sold: what the store pays for one unit">Cost (COGS)</th>
+          {% if overview %}<th scope="col" class="num" title="Revenue less cost of the units sold, {{ overview.label|lower }}">Gross profit</th>{% endif %}
           <th scope="col">Stock</th>
           <th scope="col"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
-      <tbody id="product-tbody" data-max-stock="{{ max_stock }}" data-filter="{{ stock_filter }}">
+      <tbody id="product-tbody" data-max-stock="{{ max_stock }}" data-filter="{{ stock_filter }}"{% if overview %} data-profit="1"{% endif %}>
         {% for p in products %}
-        <tr id="product-row-{{ p.pk }}" data-barcode="{{ p.barcode|default:'' }}" data-stock="{{ p.stock }}" data-price="{{ p.price }}" data-active="{{ p.is_active|yesno:'1,0' }}">
+        <tr id="product-row-{{ p.pk }}" data-barcode="{{ p.barcode|default:'' }}" data-stock="{{ p.stock }}" data-price="{{ p.price }}" data-cost="{{ p.cost|default_if_none:'' }}" data-active="{{ p.is_active|yesno:'1,0' }}">
           <td>
             <span class="rx-name row-name">{{ p.name }}</span>
             <span class="rx-sub row-code">{{ p.barcode|default:"No barcode" }}</span>
           </td>
           <td class="row-category">{{ p.category|default:"—" }}</td>
           <td class="fig num row-price">₱{{ p.price }}</td>
+          <td class="fig num row-cost">{% if p.cost is not None %}₱{{ p.cost }}{% else %}<span class="rx-muted">—</span>{% endif %}</td>
+          {% if overview %}
+          <td class="fig num row-profit">
+            {% if p.fig.gross_profit is not None and p.fig.units %}
+              <span class="gp{% if p.fig.gross_profit < 0 %} is-loss{% endif %}">{% if p.fig.gross_profit < 0 %}−{% endif %}₱{{ p.fig.gross_profit_abs|floatformat:"2g" }}</span>
+              <span class="rx-sub">{% if p.fig.gross_profit < 0 %}loss{% if p.fig.margin is not None %} · {{ p.fig.margin }}%{% endif %}{% elif p.fig.margin is not None %}{{ p.fig.margin }}% margin{% endif %}</span>
+            {% elif p.fig.units %}
+              <span class="rx-muted" title="Sold, but there's no cost to count it with">—</span><span class="rx-sub">no cost</span>
+            {% else %}
+              <span class="rx-muted" title="No sales {{ overview.label|lower }}">—</span>
+            {% endif %}
+          </td>
+          {% endif %}
           <td class="row-stock">
             {% if not p.is_active %}
               <span class="badge badge-red">Inactive</span>
@@ -89,7 +130,7 @@
         </tr>
         {% empty %}
         <tr id="empty-row">
-          <td colspan="5" class="rx-empty">
+          <td colspan="{% if overview %}7{% else %}6{% endif %}" class="rx-empty">
             <i class="bi bi-box-seam" aria-hidden="true"></i>
             {% if search %}No products match “{{ search }}”.
             {% elif stock_filter == 'attention' %}Everything is stocked.
@@ -135,6 +176,21 @@
 <style>
 .prod-table .row-name { display: block; }
 .prod-table .row-price { color: var(--ink); font-weight: 700; font-size: 14px; }
+.prod-table .row-cost { color: var(--ink-2); font-size: 14px; }
+.prod-table .row-profit .gp { display: block; color: var(--ink); font-weight: 700; font-size: 14px; }
+.prod-table .row-profit .gp.is-loss { color: var(--red-ink); }
+.prod-table .row-profit .rx-sub { margin-top: 0; }
+
+/* All-products figures, between the tabs and the search bar */
+.pv { padding: 14px 16px 16px; border-bottom: 1px solid var(--rule); }
+.pv-head { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 10px; }
+.pv-head h2 { font-size: 15px; font-weight: 700; color: var(--ink); }
+.pv-scope { margin-top: 2px; font-size: 13px; color: var(--ink-3); }
+.pv-period { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.pv-period .form-control { min-height: 36px; height: 36px; padding: 0 10px; font-size: 14px; width: auto; }
+.pv-warn { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; font-size: 13px; color: var(--amber-ink); }
+@media (max-width: 760px) { .pv { padding: 12px; } }
+.form-hint { display: block; margin-top: 4px; font-size: 12px; color: var(--ink-3); }
 .prod-table .row-category { color: var(--ink-2); }
 .stock { display: grid; grid-template-columns: 36px 110px; align-items: center; gap: 10px; }
 .stock-num { font-size: 13.5px; font-weight: 700; color: var(--ink); }
@@ -194,13 +250,20 @@
           <input type="number" id="add-price" class="form-control fig" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
         </div>
         <div class="form-group">
+          <label class="form-label" for="add-cost">Cost (COGS, ₱) <span class="req">optional</span></label>
+          <input type="number" id="add-cost" class="form-control fig" placeholder="0.00" step="0.01" min="0" inputmode="decimal" aria-describedby="add-cost-hint">
+          <span class="form-hint" id="add-cost-hint">What you pay for one unit</span>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group" style="margin-bottom:0;">
           <label class="form-label" for="add-stock">Stock <span class="req">required</span></label>
           <input type="number" id="add-stock" class="form-control fig" placeholder="0" min="0" inputmode="numeric">
         </div>
-      </div>
-      <div class="form-group" style="margin-bottom:0;">
-        <label class="form-label" for="add-barcode">Barcode</label>
-        <input type="text" id="add-barcode" class="form-control fig" placeholder="Scan or type the barcode">
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" for="add-barcode">Barcode</label>
+          <input type="text" id="add-barcode" class="form-control fig" placeholder="Scan or type">
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -236,13 +299,20 @@
           <input type="number" id="edit-price" class="form-control fig" step="0.01" min="0" inputmode="decimal">
         </div>
         <div class="form-group">
+          <label class="form-label" for="edit-cost">Cost (COGS, ₱) <span class="req">optional</span></label>
+          <input type="number" id="edit-cost" class="form-control fig" placeholder="0.00" step="0.01" min="0" inputmode="decimal" aria-describedby="edit-cost-hint">
+          <span class="form-hint" id="edit-cost-hint">What you pay for one unit</span>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group" style="margin-bottom:0;">
           <label class="form-label" for="edit-stock">Stock <span class="req">required</span></label>
           <input type="number" id="edit-stock" class="form-control fig" min="0" inputmode="numeric">
         </div>
-      </div>
-      <div class="form-group" style="margin-bottom:0;">
-        <label class="form-label" for="edit-barcode">Barcode</label>
-        <input type="text" id="edit-barcode" class="form-control fig" placeholder="Scan or type the barcode">
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label" for="edit-barcode">Barcode</label>
+          <input type="text" id="edit-barcode" class="form-control fig" placeholder="Scan or type">
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -398,7 +468,7 @@ function debounceSearch() {
 
 // ── Add ───────────────────────────────────────────────
 function resetAddForm() {
-  ['add-name', 'add-price', 'add-stock', 'add-barcode', 'add-category'].forEach(id => { document.getElementById(id).value = ''; });
+  ['add-name', 'add-price', 'add-cost', 'add-stock', 'add-barcode', 'add-category'].forEach(id => { document.getElementById(id).value = ''; });
   clearModalAlert('add');
 }
 
@@ -410,6 +480,7 @@ async function submitAdd() {
     fd.append('name', document.getElementById('add-name').value);
     fd.append('category', document.getElementById('add-category').value);
     fd.append('price', document.getElementById('add-price').value);
+    fd.append('cost', document.getElementById('add-cost').value);
     fd.append('stock', document.getElementById('add-stock').value);
     fd.append('barcode', document.getElementById('add-barcode').value);
     const data = await postForm('/products/add/', fd);
@@ -433,6 +504,9 @@ function rowHtml(p) {
   return '<td><span class="rx-name row-name">' + escapeHtml(p.name) + '</span><span class="rx-sub row-code">' + escapeHtml(p.barcode || 'No barcode') + '</span></td>'
     + '<td class="row-category">' + escapeHtml(p.category || '—') + '</td>'
     + '<td class="fig num row-price">₱' + escapeHtml(p.price) + '</td>'
+    + '<td class="fig num row-cost">' + costCell(p.cost) + '</td>'
+    // A product just added has no sales yet: nothing to show in Gross profit.
+    + (document.getElementById('product-tbody').dataset.profit ? '<td class="fig num row-profit"><span class="rx-muted">—</span></td>' : '')
     + '<td class="row-stock">' + stockCell(parseInt(p.stock) || 0, p.is_active) + '</td>'
     + '<td><div class="rx-actions">'
     +   '<button type="button" class="rx-icon" onclick="openEditModal(' + p.pk + ')" aria-label="Edit ' + escapeHtml(p.name) + '" title="Edit"><i class="bi bi-pencil" aria-hidden="true"></i></button>'
@@ -441,10 +515,15 @@ function rowHtml(p) {
     + '</div></td>';
 }
 
+function costCell(cost) {
+  return cost ? '₱' + escapeHtml(cost) : '<span class="rx-muted">—</span>';
+}
+
 function setRowData(tr, p) {
   tr.dataset.barcode = p.barcode || '';
   tr.dataset.stock = p.stock;
   tr.dataset.price = p.price;
+  tr.dataset.cost = p.cost || '';
 }
 
 function appendProductRow(p) {
@@ -472,6 +551,7 @@ function openEditModal(pk) {
   document.getElementById('edit-name').value = name;
   document.getElementById('edit-category').value = categoryId;
   document.getElementById('edit-price').value = row.dataset.price || '';
+  document.getElementById('edit-cost').value = row.dataset.cost || '';
   document.getElementById('edit-stock').value = row.dataset.stock || 0;
   document.getElementById('edit-barcode').value = row.dataset.barcode || '';
   clearModalAlert('edit');
@@ -487,6 +567,7 @@ async function submitEdit() {
     fd.append('name', document.getElementById('edit-name').value);
     fd.append('category', document.getElementById('edit-category').value);
     fd.append('price', document.getElementById('edit-price').value);
+    fd.append('cost', document.getElementById('edit-cost').value);
     fd.append('stock', document.getElementById('edit-stock').value);
     fd.append('barcode', document.getElementById('edit-barcode').value);
     const data = await postForm('/products/edit/' + pk + '/', fd);
@@ -515,6 +596,7 @@ function refreshRow(p) {
   row.querySelector('.row-code').textContent = p.barcode || 'No barcode';
   row.querySelector('.row-category').textContent = p.category || '—';
   row.querySelector('.row-price').textContent = '₱' + p.price;
+  row.querySelector('.row-cost').innerHTML = costCell(p.cost);
   row.querySelector('.row-stock').innerHTML = stockCell(parseInt(p.stock) || 0, p.is_active);
   setRowData(row, p);
 }

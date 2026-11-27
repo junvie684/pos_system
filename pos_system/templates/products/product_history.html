@@ -9,7 +9,6 @@
 
 <a href="{% url 'products:product_list' %}" class="back-link"><i class="bi bi-arrow-left" aria-hidden="true"></i> Products</a>
 <div class="prod-head">
-  {% if product.image %}<span class="prod-img"><img src="{{ product.image.url }}" alt=""></span>{% endif %}
   <div>
     <h1 class="prod-name">{{ product.name }}{% if not product.is_active %} <span class="badge badge-gray">Deactivated</span>{% endif %}</h1>
     <p class="prod-meta">
@@ -36,16 +35,12 @@
   <button type="submit" class="btn btn-primary">Show</button>
 </form>
 
-<div class="summary">
-  <div><span class="s-label">Units sold</span><span class="s-val">{{ totals.total_units|default:0 }}</span></div>
-  <div><span class="s-label">Revenue</span><span class="s-val">₱{{ totals.total_revenue|default:0|floatformat:"2g" }}</span></div>
-  <div><span class="s-label">Transactions</span><span class="s-val">{{ totals.total_transactions|default:0 }}</span></div>
-  <div><span class="s-label">Units per sale</span><span class="s-val">{% if totals.avg_per_sale %}{{ totals.avg_per_sale|floatformat:1 }}{% else %}—{% endif %}</span></div>
-  <p class="s-scope">Completed sales, <span class="fig">{{ date_from }}</span> to <span class="fig">{{ date_to }}</span></p>
-</div>
-
-{% if has_data %}
+<!-- ── One card: the period's figures on top, the chart under them ── -->
 <section class="card chart-card" aria-labelledby="ph-chart-h">
+  <p class="ph-scope">Completed sales, <span class="fig">{{ date_from }}</span> to <span class="fig">{{ date_to }}</span></p>
+  {% include 'products/_sales_figures.html' with fig=fig lead=True tight=no_chart %}
+
+  {% if has_data %}
   <div class="sec-head"><div><h2 id="ph-chart-h">Units sold per {% if group_by == 'monthly' %}month{% else %}day{% endif %}</h2></div></div>
   <div class="vchart" role="list">
     {% for entry in history %}
@@ -56,8 +51,10 @@
     </div>
     {% endfor %}
   </div>
+  {% else %}
+  <h2 id="ph-chart-h" class="sr-only">Units sold</h2>
+  {% endif %}
 </section>
-{% endif %}
 
 <section class="card table-card" aria-labelledby="ph-table-h">
   <div class="sec-head"><div><h2 id="ph-table-h">By {% if group_by == 'monthly' %}month{% else %}day{% endif %}</h2><p class="panel-sub">Days with no sales are left out.</p></div></div>
@@ -98,8 +95,6 @@
 .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: var(--ink-2); text-decoration: none; min-height: 32px; }
 .back-link:hover { color: var(--ink); }
 .prod-head { display: flex; align-items: center; gap: 14px; margin: 6px 0 20px; }
-.prod-img { width: 56px; height: 56px; border-radius: 4px; overflow: hidden; background: var(--paper-2); border: 1px solid var(--rule); flex-shrink: 0; }
-.prod-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .prod-name { font-size: 22px; font-weight: 800; letter-spacing: -.2px; line-height: 1.2; }
 .prod-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-top: 4px; font-size: 14px; color: var(--ink-2); }
 .prod-meta .price { font-size: 16px; font-weight: 700; color: var(--ink); }
@@ -109,6 +104,9 @@
 .prod-meta .code { font-size: 13px; }
 .prod-meta .muted { color: var(--ink-3); }
 .chart-card { margin-bottom: 16px; }
+.ph-scope { margin-bottom: 10px; font-size: 13px; color: var(--ink-3); }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+
 .ph-table .period { color: var(--ink); font-weight: 600; white-space: nowrap; }
 .ph-table td.strong { color: var(--ink); font-weight: 700; }
 @media (max-width: 600px) { .prod-name { font-size: 19px; } .vchart { min-height: 160px; } }

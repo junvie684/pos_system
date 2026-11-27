@@ -517,7 +517,9 @@ def _checkout(request, pending_sale=None):
                     raise CheckoutError('A product in the sale no longer exists or is inactive.')
                 if status == 'completed':
                     Product.objects.filter(pk=pid).update(stock=F('stock') - qty)
-                SaleItem.objects.create(sale=sale, product=product, quantity=qty, unit_price=product.price)
+                # Price and cost as they stand now; a held sale gets fresh ones when completed.
+                SaleItem.objects.create(sale=sale, product=product, quantity=qty,
+                                        unit_price=product.price, unit_cost=product.cost)
                 total += product.price * qty
 
             _settle_payment(sale, status, payment_method, tendered_raw, reference, total)
