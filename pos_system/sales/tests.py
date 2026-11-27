@@ -49,7 +49,9 @@ class CashierTemplateContractTests(SaleTestBase):
         self.assertContains(response, 'id="hold-btn"')
         self.assertContains(response, 'id="complete-btn"')
         self.assertContains(response, 'aria-label="Sale actions"')
-        self.assertContains(response, 'aria-describedby="cart-total"')
+        # The total, and the hint saying why the button waits for the cash received
+        self.assertContains(response, 'aria-describedby="cart-total cash-needed"')
+        self.assertContains(response, 'id="cash-needed"')
 
     def test_held_sale_screens_expose_cashier_flow_landmarks(self):
         pos_login(self.client, self.cashier)

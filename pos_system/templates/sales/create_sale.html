@@ -142,12 +142,15 @@
           <button type="button" class="quick-btn" onclick="setExact(this)">Exact</button>
         </div>
         <div class="cash-row">
-          <input type="number" id="cash-tendered" class="cart-input fig" placeholder="Exact if blank" min="0" step="0.01" inputmode="decimal" oninput="clearQuick(); calcChange()" aria-label="Cash received">
+          <input type="number" id="cash-tendered" class="cart-input fig" placeholder="Amount received" min="0" step="0.01" inputmode="decimal" oninput="clearQuick(); calcChange()" aria-label="Cash received" aria-describedby="cash-needed">
           <div class="change-row">
             <span>Change</span>
             <span id="change-due" class="fig">₱0.00</span>
           </div>
         </div>
+        <p id="cash-needed" class="cash-needed" hidden>
+          <i class="bi bi-info-circle" aria-hidden="true"></i> Enter the cash received, or tap Exact.
+        </p>
         <div id="insufficient-warning" class="cart-warn" hidden>
           <i class="bi bi-exclamation-circle" aria-hidden="true"></i> Cash received is less than the total.
         </div>
@@ -167,7 +170,7 @@
       <button type="button" class="btn btn-ghost act-hold" id="hold-btn" onclick="saveAsPending()" disabled>
         <i class="bi bi-pause-circle" aria-hidden="true"></i> Hold
       </button>
-      <button type="button" class="btn btn-commit act-go" id="complete-btn" onclick="completeSale()" aria-describedby="cart-total" disabled>
+      <button type="button" class="btn btn-commit act-go" id="complete-btn" onclick="completeSale()" aria-describedby="cart-total cash-needed" disabled>
         Complete sale
       </button>
     </form>
@@ -387,6 +390,8 @@
 #change-due.short { color: var(--red); }
 .cart-warn { margin-top: 8px; padding: 8px 10px; border-radius: var(--radius); background: var(--red-tint); color: #8E1C22; font-size: 13.5px; font-weight: 600; display: flex; gap: 8px; align-items: center; }
 .cart-warn[hidden], #reference-number-group[hidden], #cash-tendered-card[hidden] { display: none; }
+.cash-needed { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 13px; color: var(--ink-3); }
+.cash-needed[hidden] { display: none; }
 
 .cart-actions { flex-shrink: 0; display: grid; grid-template-columns: 1fr 2fr; gap: 8px; padding-top: 2px; }
 @media (max-height: 700px) and (min-width: 801px) { .reg-cart { overflow-y: auto; } .sheet { flex: 0 0 auto; max-height: none; } }
@@ -736,12 +741,15 @@ function calcChange() {
   const isCash   = document.getElementById('payment-method-select').value === 'cash';
   const paid     = isCash && tendered > 0;
   const short    = paid && change < 0;
+  // A cash sale needs the amount received before it can be completed.
+  const needsCash = isCash && cartTotal > 0 && !paid;
 
   changeEl.textContent = short ? '−' + peso(Math.abs(change)) : peso(paid ? change : 0);
   changeEl.classList.toggle('short', short);
   changeEl.classList.toggle('zero', !(paid && change > 0) && !short);
   warning.hidden = !short;
-  btn.disabled = cartTotal === 0 || short;
+  document.getElementById('cash-needed').hidden = !needsCash;
+  btn.disabled = cartTotal === 0 || short || needsCash;
 }
 
 function clearQuick() { document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active')); }
@@ -833,12 +841,16 @@ function completeSale() {
   if (Object.keys(cart).length === 0) { showToast('Add at least one product first.', 'err'); return; }
 
   const paymentMethod = document.getElementById('payment-method-select').value;
-  // Blank cash on a cash sale means the customer paid the exact amount
-  const tendered = (parseFloat(document.getElementById('cash-tendered').value) || 0) || (paymentMethod === 'cash' ? cartTotal : 0);
+  const tendered = parseFloat(document.getElementById('cash-tendered').value) || 0;
   const referenceNumber = document.getElementById('reference-number-input').value.trim();
 
   if (paymentMethod === 'cash') {
-    if (tendered > 0 && tendered < cartTotal) { showToast('Cash received is less than the total.', 'err'); return; }
+    if (tendered <= 0) {
+      showToast('Enter the cash received, or tap Exact.', 'err');
+      document.getElementById('cash-tendered').focus();
+      return;
+    }
+    if (tendered < cartTotal) { showToast('Cash received is less than the total.', 'err'); return; }
   } else if (EWALLET_METHODS.includes(paymentMethod) && !referenceNumber) {
     showToast('Enter the reference number to continue.', 'err');
     document.getElementById('reference-number-input').focus();
