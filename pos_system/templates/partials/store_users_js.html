@@ -87,12 +87,12 @@ function formatErrors(errors) {
 /* ── Row parts (same markup as the server-rendered rows) ── */
 const ROLE_NAME = u => u.is_superuser ? 'Admin' : (u.is_staff ? 'Manager' : 'Cashier');
 const ACCESS = [
-  ['can_access_products', 'Products'], ['can_access_categories', 'Categories'], ['can_access_reports', 'Reports'],
+  ['can_access_dashboard', 'Dashboard'], ['can_access_products', 'Products'], ['can_access_categories', 'Categories'], ['can_access_reports', 'Reports'],
   ['can_access_user_management', 'Users'], ['can_access_pending_sales', 'Held sales'], ['can_access_shift_report', 'Cash closing'],
 ];
 function editCall(u) {
   const role = u.is_superuser ? 'admin' : (u.is_staff ? 'manager' : 'cashier');
-  return `openEditModal(${Number(u.pk)},${arg(u.username)},${arg(u.first_name)},${arg(u.last_name)},${arg(u.email === '—' ? '' : u.email)},${arg(role)},${!!u.can_access_products},${!!u.can_access_categories},${!!u.can_access_reports},${!!u.can_access_user_management},${!!u.can_access_pending_sales},${!!u.can_access_shift_report},${!!u.is_active})`;
+  return `openEditModal(${Number(u.pk)},${arg(u.username)},${arg(u.first_name)},${arg(u.last_name)},${arg(u.email === '—' ? '' : u.email)},${arg(role)},${!!u.can_access_products},${!!u.can_access_categories},${!!u.can_access_reports},${!!u.can_access_user_management},${!!u.can_access_pending_sales},${!!u.can_access_shift_report},${!!u.is_active},${!!u.can_access_dashboard})`;
 }
 function userCells(u) {
   const name = u.full_name && u.full_name !== '—' ? u.full_name : u.username;
@@ -117,11 +117,11 @@ function updateCount() {
 /* ── Permissions sync from role ─────────────────── */
 function syncPermissions(prefix) {
   const role = document.getElementById(prefix + '-role').value;
-  const fields = ['products', 'categories', 'reports', 'users', 'pending', 'shift'];
+  const fields = ['dashboard', 'products', 'categories', 'reports', 'users', 'pending', 'shift'];
   const matrix = {
-    admin:   [true,  true,  true,  true,  true,  true],
-    manager: [true,  true,  true,  false, true,  true],
-    cashier: [false, false, false, false, false, false],
+    admin:   [true,  true,  true,  true,  true,  true,  true],
+    manager: [true,  true,  true,  true,  false, true,  true],
+    cashier: [false, false, false, false, false, false, false],
   };
   const vals = matrix[role] || matrix.cashier;
   fields.forEach((f, i) => {
@@ -133,6 +133,7 @@ function syncPermissions(prefix) {
 function getPermissions(prefix) {
   const on = f => document.getElementById(prefix + '-perm-' + f).checked ? '1' : 'false';
   return {
+    can_access_dashboard: on('dashboard'),
     can_access_products: on('products'),
     can_access_categories: on('categories'),
     can_access_reports: on('reports'),
@@ -196,7 +197,7 @@ function appendUserRow(u) {
 /* ── Edit user ─────────────────────────────────── */
 function openEditModal(pk, username, firstName, lastName, email, role,
                        permProducts, permCategories, permReports, permUsers,
-                       permPending, permShift, isActive) {
+                       permPending, permShift, isActive, permDashboard) {
   const row = document.getElementById(`user-row-${pk}`);
   document.getElementById('edit-pk').value = pk;
   document.getElementById('edit-url').value = row ? row.dataset.editUrl : '';
@@ -206,6 +207,7 @@ function openEditModal(pk, username, firstName, lastName, email, role,
   document.getElementById('edit-last-name').value = lastName;
   document.getElementById('edit-email').value = email;
   document.getElementById('edit-role').value = role;
+  document.getElementById('edit-perm-dashboard').checked = permDashboard;
   document.getElementById('edit-perm-products').checked = permProducts;
   document.getElementById('edit-perm-categories').checked = permCategories;
   document.getElementById('edit-perm-reports').checked = permReports;

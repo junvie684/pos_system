@@ -71,7 +71,23 @@ def pos_login_required(view_func):
     return _wrapped
 
 
+def dashboard_access_required(view_func):
+    """
+    The Dashboard is the default landing page, so a user without the Dashboard
+    switch is sent to New Sale quietly instead of being told off on every login.
+    """
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not _is_pos_session(request):
+            return redirect('accounts:login')
+        if not getattr(getattr(request.user, 'profile', None), 'can_access_dashboard', False):
+            return redirect('sales:create_sale')
+        return view_func(request, *args, **kwargs)
+    return _wrapped
+
+
 FEATURE_NAMES = {
+    'can_access_dashboard': 'Dashboard',
     'can_access_products': 'Products',
     'can_access_categories': 'Categories',
     'can_access_reports': 'Reports',

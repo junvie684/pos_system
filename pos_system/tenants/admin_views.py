@@ -40,6 +40,7 @@ def _permissions_from_user(user, is_owner=False):
     Mirrors the same helper in views.py.
     """
     return {
+        'can_access_dashboard'      : user.is_staff or user.is_superuser,
         'can_access_products'       : user.is_staff or user.is_superuser,
         'can_access_categories'     : user.is_staff or user.is_superuser,
         'can_access_reports'        : user.is_staff or user.is_superuser,

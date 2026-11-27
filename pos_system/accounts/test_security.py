@@ -106,6 +106,23 @@ class AccessSwitchTests(TestCase):
                 with self.subTest(flag=flag, url=url):
                     self.assertEqual(self.client.get(url).status_code, 200)
 
+    def test_dashboard_switch_decides_dashboard_access(self):
+        cashier = make_user(self.tenant, 'cashier-dash')            # cashier default: off
+        allowed = make_user(self.tenant, 'cashier-dash-on', can_access_dashboard=True)
+        manager = make_user(self.tenant, 'mgr-dash', role='manager')  # manager default: on
+        pos_login(self.client, cashier)
+        for url in ('/', '/charts/'):
+            with self.subTest(user='cashier', url=url):
+                # Sent to New Sale quietly: the dashboard is the login landing page.
+                self.assertRedirects(self.client.get(url), '/new/', fetch_redirect_response=False)
+        self.assertNotContains(self.client.get('/new/'), 'class="nav-text">Dashboard<')
+        for user in (allowed, manager):
+            self.client.logout()
+            pos_login(self.client, user)
+            for url in ('/', '/charts/'):
+                with self.subTest(user=user.username, url=url):
+                    self.assertEqual(self.client.get(url).status_code, 200)
+
     def test_switched_off_writes_are_refused(self):
         from tenants.test_utils import make_category, make_product
         manager = make_user(self.tenant, 'mgr', role='manager',

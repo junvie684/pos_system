@@ -552,7 +552,7 @@ class PnlTests(SaleTestBase):
         self.assertEqual(body.splitlines()[0].count(','), 4)
 
     def test_pnl_needs_reports_access(self):
-        user = make_user(self.tenant, 'noreports', can_access_reports=False)
+        user = make_user(self.tenant, 'noreports', can_access_reports=False, can_access_dashboard=True)
         pos_login(self.client, user)
         resp = self.client.get('/pnl/')
         self.assertRedirects(resp, '/', fetch_redirect_response=False)
@@ -571,6 +571,8 @@ class DashboardTilesTests(SaleTestBase):
     def setUp(self):
         super().setUp()
         make_sale(self.tenant, self.cashier, self.product, qty=2)   # 100.00 today
+        self.cashier.profile.can_access_dashboard = True   # cashiers need the switch for the dashboard
+        self.cashier.profile.save()
         pos_login(self.client, self.cashier)
 
     def test_default_tiles_and_today_products(self):
@@ -621,6 +623,8 @@ class DashboardChartsTests(SaleTestBase):
     def setUp(self):
         super().setUp()
         make_sale(self.tenant, self.cashier, self.product, qty=2)   # 100.00 today
+        self.cashier.profile.can_access_dashboard = True   # cashiers need the switch for the dashboard
+        self.cashier.profile.save()
         pos_login(self.client, self.cashier)
 
     def test_default_chart_by_month_with_breakdowns(self):

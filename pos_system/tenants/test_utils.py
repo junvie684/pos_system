@@ -19,10 +19,10 @@ def make_tenant(slug='store-a'):
 
 # Access each role gets by default, as the user form ticks it.
 ROLE_ACCESS = {
-    'admin':   dict(can_access_products=True, can_access_categories=True, can_access_reports=True,
+    'admin':   dict(can_access_dashboard=True, can_access_products=True, can_access_categories=True, can_access_reports=True,
                     can_access_user_management=True, can_access_pending_sales=True,
                     can_access_shift_report=True),
-    'manager': dict(can_access_products=True, can_access_categories=True, can_access_reports=True,
+    'manager': dict(can_access_dashboard=True, can_access_products=True, can_access_categories=True, can_access_reports=True,
                     can_access_pending_sales=True, can_access_shift_report=True),
     'cashier': {},
 }

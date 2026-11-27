@@ -150,7 +150,7 @@ class SeparateSessionsTests(TestCase):
 
     def setUp(self):
         self.tenant = make_tenant('store-a')
-        make_user(self.tenant, 'cashier1')
+        make_user(self.tenant, 'cashier1', can_access_dashboard=True)
         make_platform_admin()
 
     def sign_in_both(self, client=None):

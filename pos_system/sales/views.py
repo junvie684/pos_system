@@ -1,6 +1,8 @@
 import re
 from django.contrib import messages
-from accounts.decorators import feature_required, manager_or_admin_required, pos_login_required
+from accounts.decorators import (
+    dashboard_access_required, feature_required, manager_or_admin_required, pos_login_required,
+)
 from django.db.models import Q
 from django.shortcuts import render, redirect, get_object_or_404
 
@@ -64,7 +66,7 @@ def _custom_range(request, today):
     return None
 
 
-@pos_login_required
+@dashboard_access_required
 def dashboard(request):
     """Tiles: period summaries across the top; the selected tile's products
     (or sale lines) underneath."""
@@ -145,7 +147,7 @@ def dashboard(request):
 
 
 # ─── Dashboard: Chart tab ────────────────────────────────────
-@pos_login_required
+@dashboard_access_required
 def charts(request):
     """One measure over time, a summary beside it, and breakdowns of the period."""
     from reports import charts as rc

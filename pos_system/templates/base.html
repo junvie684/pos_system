@@ -695,9 +695,11 @@
 
     {# ── MAIN ── visible to all authenticated users #}
     <div class="nav-section-label">Main</div>
+    {% if user.profile.can_access_dashboard %}
     <a href="{% url 'sales:dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
       <i class="bi bi-grid-1x2"></i><span class="nav-text">Dashboard</span>
     </a>
+    {% endif %}
     <a href="{% url 'sales:create_sale' %}" class="nav-item {% if request.resolver_match.url_name == 'create_sale' %}active{% endif %}">
       <i class="bi bi-plus-circle"></i><span class="nav-text">New Sale</span>
     </a>

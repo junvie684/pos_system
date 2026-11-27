@@ -18,7 +18,7 @@ from accounts.models import UserProfile
 
 ROLES = ('cashier', 'manager', 'admin')
 PERMISSION_FIELDS = (
-    'can_access_products', 'can_access_categories', 'can_access_reports',
+    'can_access_dashboard', 'can_access_products', 'can_access_categories', 'can_access_reports',
     'can_access_user_management', 'can_access_pending_sales', 'can_access_shift_report',
 )
 
